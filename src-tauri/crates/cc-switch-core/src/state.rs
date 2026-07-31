@@ -1,12 +1,15 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use rusqlite::backup::Backup;
 use rusqlite::Connection;
 
 use crate::error::CoreError;
 use crate::provider::live::TargetPlatform;
 use crate::schema::{
-    configure_connection, initialize_new_database, read_schema_version, validate_existing_database,
+    configure_connection, initialize_new_database, migrate_supported_database, read_schema_version,
+    validate_existing_database, DESKTOP_SCHEMA_VERSION,
 };
 
 /// Agent 可安全构造的无界面状态，只持有目标主机数据库与显式 HOME。
@@ -19,7 +22,8 @@ pub struct HeadlessState {
 }
 
 impl HeadlessState {
-    /// 打开目标 HOME 的真实数据库；新库可初始化，已有库只校验而绝不执行迁移 DDL。
+    /// 打开目标 HOME 的真实数据库；新库直接初始化，桌面 v10+ 旧库先做一致备份再迁移。
+    /// 更早、未来或版本正确但结构损坏的数据库仍在任何业务写入前拒绝。
     pub fn open(home: impl AsRef<Path>) -> Result<Self, CoreError> {
         Self::open_with_platform(home, TargetPlatform::current())
     }
@@ -42,6 +46,13 @@ impl HeadlessState {
         if is_new {
             initialize_new_database(&connection)?;
         } else {
+            let detected = read_schema_version(&connection)?;
+            if (10..DESKTOP_SCHEMA_VERSION).contains(&detected) {
+                // 备份先于任何 DDL，且使用当前连接的在线快照覆盖 WAL 内容；迁移失败时
+                // 备份仍保留，便于用户用桌面端恢复，绝不能退化成直接复制主数据库文件。
+                backup_before_schema_migration(&connection, &data_dir, detected)?;
+                migrate_supported_database(&connection, &home.join(".codex"))?;
+            }
             validate_existing_database(&connection)?;
         }
         Ok(Self {
@@ -99,4 +110,35 @@ impl HeadlessState {
     pub(crate) fn connection(&self) -> Result<MutexGuard<'_, Connection>, CoreError> {
         self.connection.lock().map_err(|_| CoreError::StatePoisoned)
     }
+}
+
+/// 为 Agent 自动迁移创建唯一的一致性快照。
+///
+/// 备份目录沿用桌面端的 `.cc-switch/backups`，但文件名带来源和版本范围，避免与
+/// 常规定时备份混淆；若备份失败则中止迁移，宁可拒绝远程操作也不冒数据不可恢复风险。
+fn backup_before_schema_migration(
+    connection: &Connection,
+    data_dir: &Path,
+    detected: i32,
+) -> Result<PathBuf, CoreError> {
+    let backup_dir = data_dir.join("backups");
+    std::fs::create_dir_all(&backup_dir).map_err(|source| CoreError::Io {
+        path: backup_dir.clone(),
+        source,
+    })?;
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let backup_path = backup_dir.join(format!(
+        "cc-switch-agent-pre-migration-v{detected}-to-v{DESKTOP_SCHEMA_VERSION}-{nonce}.db"
+    ));
+
+    let mut destination = Connection::open(&backup_path)?;
+    {
+        let backup = Backup::new(connection, &mut destination)?;
+        backup.run_to_completion(128, Duration::from_millis(5), None)?;
+    }
+    drop(destination);
+    Ok(backup_path)
 }

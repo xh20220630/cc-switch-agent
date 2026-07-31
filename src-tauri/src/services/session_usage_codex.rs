@@ -22,7 +22,6 @@ use crate::database::{lock_conn, Database};
 use crate::error::AppError;
 use crate::proxy::usage::calculator::{CostCalculator, ModelPricing};
 use crate::proxy::usage::parser::TokenUsage;
-use crate::services::session_sync::reset_codex_usage_on_conn;
 use crate::services::session_usage::{
     get_sync_state, metadata_modified_nanos, update_sync_state, SessionSyncResult,
 };
@@ -2095,7 +2094,9 @@ mod tests {
                 )?;
             }
 
-            reset_codex_usage_on_conn(&conn, wide_dir)?;
+            // 直接验证桌面迁移与 Agent 共用的 Core 清理入口，防止测试只覆盖适配包装。
+            cc_switch_core::reset_codex_usage_on_connection(&conn, wide_dir)
+                .map_err(|error| AppError::Database(error.to_string()))?;
             let codex_rows: i64 = conn.query_row(
                 "SELECT COUNT(*) FROM proxy_request_logs WHERE data_source = 'codex_session'",
                 [],

@@ -15,7 +15,10 @@ pub use error::CoreError;
 // Provider 的完整 DTO 与数据库服务统一从独立模块导出，RPC 与桌面适配层不得再维护私有 SQL。
 pub use provider::{project_provider, LiveContext, SwitchResult, TargetPlatform};
 pub use provider::{ProviderRecord, ProviderService, ProviderSortUpdate};
-pub use schema::{SchemaError, DESKTOP_SCHEMA_VERSION};
+pub use schema::{
+    migrate_supported_database, reset_codex_usage_on_connection, SchemaError,
+    DESKTOP_SCHEMA_VERSION,
+};
 pub use state::HeadlessState;
 pub use usage::{
     fresh_input_sql, is_cache_inclusive_app, DailyStats, DataSourceSummary, LogFilters,
