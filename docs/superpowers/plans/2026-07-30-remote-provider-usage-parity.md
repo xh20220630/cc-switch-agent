@@ -1,6 +1,6 @@
 # Remote Provider and Usage Parity Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Make Provider management and the complete Usage dashboard operate on the selected local or SSH target with identical database semantics and strict cross-target isolation.
 
@@ -34,11 +34,11 @@ The implementation must keep each boundary focused:
 - Modify: `src-tauri/src/remote/ephemeral_deploy.rs`
 - Modify: `src-tauri/tests/remote_ephemeral_deploy.rs`
 
-- [ ] **Step 1: Stop the repository Tauri development process tree**
+- [x] **Step 1: Stop the repository Tauri development process tree**
 
 Resolve the running `src-tauri/target/debug/cc-switch.exe` parent chain and stop only its repository-owned Tauri/Vite descendants and ancestors. Record the two embedded Agent environment paths; Windows locks the desktop build output while the process is running, so Rust RED/GREEN results are not trustworthy until this tree exits.
 
-- [ ] **Step 2: Re-run the regression test before committing**
+- [x] **Step 2: Re-run the regression test before committing**
 
 Run:
 
@@ -51,7 +51,7 @@ cargo test -j 1 --test remote_ephemeral_deploy -- --nocapture
 
 Expected: 9 tests pass, including `launch_command_does_not_overwrite_zsh_path_parameter` and `remote_commands_avoid_double_quotes_preserved_by_windows_openssh`.
 
-- [ ] **Step 3: Verify formatting and diff scope**
+- [x] **Step 3: Verify formatting and diff scope**
 
 Run:
 
@@ -64,7 +64,7 @@ git diff --name-only
 
 Expected: formatting and diff checks pass; only the two SSH files above are uncommitted product changes.
 
-- [ ] **Step 4: Commit the SSH fix separately**
+- [x] **Step 4: Commit the SSH fix separately**
 
 ```powershell
 git add src-tauri/src/remote/ephemeral_deploy.rs src-tauri/tests/remote_ephemeral_deploy.rs
@@ -83,7 +83,7 @@ Expected: the commit contains only the two listed files.
 - Modify: `src-tauri/crates/cc-switch-core/src/lib.rs`
 - Modify: `src-tauri/crates/cc-switch-core/Cargo.toml`
 
-- [ ] **Step 1: Write the failing desktop-schema compatibility tests**
+- [x] **Step 1: Write the failing desktop-schema compatibility tests**
 
 Create `schema_compat.rs` with a canonical fixture using `app_type`, `is_current`, `provider_endpoints`, `usage_logs`, and `model_pricing`:
 
@@ -121,7 +121,7 @@ fn rejects_incompatible_existing_schema_before_writes() {
 
 The helper SQL must create the exact required v16 columns from `src-tauri/src/database/schema.rs`, not the removed `providers.app/current_providers` layout.
 
-- [ ] **Step 2: Run the test and verify RED**
+- [x] **Step 2: Run the test and verify RED**
 
 Run:
 
@@ -132,7 +132,7 @@ cargo test -j 1 -p cc-switch-core --test schema_compat -- --nocapture
 
 Expected: compilation fails because `SchemaError`, `DESKTOP_SCHEMA_VERSION`, and compatibility methods do not exist.
 
-- [ ] **Step 3: Implement explicit state and schema validation**
+- [x] **Step 3: Implement explicit state and schema validation**
 
 Add these public contracts:
 
@@ -175,7 +175,7 @@ pub enum SchemaError {
 
 Every new or moved function must include Chinese maintenance comments explaining schema mutation boundaries and concurrency choices.
 
-- [ ] **Step 4: Run schema and Core regression tests**
+- [x] **Step 4: Run schema and Core regression tests**
 
 ```powershell
 cargo test -j 1 -p cc-switch-core --test schema_compat -- --nocapture
@@ -184,7 +184,7 @@ cargo test -j 1 -p cc-switch-core -- --nocapture
 
 Expected: all Core tests pass and no test creates `providers.app` or `current_providers`.
 
-- [ ] **Step 5: Commit canonical schema support**
+- [x] **Step 5: Commit canonical schema support**
 
 ```powershell
 git add src-tauri/crates/cc-switch-core
@@ -201,7 +201,7 @@ git commit -m "refactor(remote): use canonical database schema"
 - Modify: `src-tauri/crates/cc-switch-core/src/lib.rs`
 - Modify: `src-tauri/crates/cc-switch-core/tests/provider_core.rs`
 
-- [ ] **Step 1: Write a failing full-record read test**
+- [x] **Step 1: Write a failing full-record read test**
 
 ```rust
 #[test]
@@ -224,7 +224,7 @@ fn lists_existing_desktop_providers_with_endpoints_and_current_state() {
 }
 ```
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 ```powershell
 cargo test -j 1 -p cc-switch-core --test provider_parity -- --nocapture
@@ -232,7 +232,7 @@ cargo test -j 1 -p cc-switch-core --test provider_parity -- --nocapture
 
 Expected: compilation fails because the current `ProviderRecord` lacks icon, endpoint, and failover fields or SQL still references `app`.
 
-- [ ] **Step 3: Implement the complete shared Provider model**
+- [x] **Step 3: Implement the complete shared Provider model**
 
 Define the shared DTO with frontend-compatible camelCase serialization:
 
@@ -260,7 +260,7 @@ pub struct ProviderRecord {
 
 Move canonical read SQL from `src-tauri/src/database/dao/providers.rs` into `provider/repository.rs`. Query `app_type`, merge `provider_endpoints` into the meta JSON `customEndpoints` object, and resolve current Provider through `is_current=1`. Keep unknown meta keys byte-for-byte semantically equivalent on read/write so a temporary Agent cannot erase newer desktop metadata. Accept exactly the eight `AppId` strings defined in `src/lib/api/types.ts`.
 
-- [ ] **Step 4: Run Provider read regressions**
+- [x] **Step 4: Run Provider read regressions**
 
 ```powershell
 cargo test -j 1 -p cc-switch-core --test provider_parity -- --nocapture
@@ -269,7 +269,7 @@ cargo test -j 1 -p cc-switch-core --test provider_core -- --nocapture
 
 Expected: full-record fixture and existing Provider tests pass.
 
-- [ ] **Step 5: Commit Provider read parity**
+- [x] **Step 5: Commit Provider read parity**
 
 ```powershell
 git add src-tauri/crates/cc-switch-core/src/provider src-tauri/crates/cc-switch-core/src/lib.rs src-tauri/crates/cc-switch-core/tests
@@ -283,7 +283,7 @@ git commit -m "feat(remote): read canonical providers"
 - Modify: `src-tauri/crates/cc-switch-core/src/provider/mod.rs`
 - Modify: `src-tauri/crates/cc-switch-core/tests/provider_parity.rs`
 
-- [ ] **Step 1: Write failing CRUD, sorting, and switch transaction tests**
+- [x] **Step 1: Write failing CRUD, sorting, and switch transaction tests**
 
 Add tests that assert:
 
@@ -304,7 +304,7 @@ fn provider_writes_use_app_type_and_is_current_atomically() {
 
 Also cover duplicate IDs, deleting the current Provider, ID changes, unknown app IDs, and a busy database returning `DATABASE_BUSY` without partial writes.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 ```powershell
 cargo test -j 1 -p cc-switch-core --test provider_parity provider_writes -- --nocapture
@@ -312,7 +312,7 @@ cargo test -j 1 -p cc-switch-core --test provider_parity provider_writes -- --no
 
 Expected: old SQL fails on `app`/`current_providers` or the new transaction API is missing.
 
-- [ ] **Step 3: Implement canonical repository writes**
+- [x] **Step 3: Implement canonical repository writes**
 
 Use `app_type` in every statement. Switch in one transaction:
 
@@ -331,7 +331,7 @@ fn set_current(tx: &rusqlite::Transaction<'_>, app: &str, id: &str) -> Result<()
 
 CRUD must preserve endpoint rows, desktop meta serialization, existing `created_at`, and sort order. Map SQLite busy/locked errors to `DATABASE_BUSY`.
 
-- [ ] **Step 4: Run all Core Provider tests**
+- [x] **Step 4: Run all Core Provider tests**
 
 ```powershell
 cargo test -j 1 -p cc-switch-core --test provider_parity -- --nocapture
@@ -340,7 +340,7 @@ cargo test -j 1 -p cc-switch-core --test provider_core -- --nocapture
 
 Expected: all tests pass with exactly one current Provider per app.
 
-- [ ] **Step 5: Commit Provider transactions**
+- [x] **Step 5: Commit Provider transactions**
 
 ```powershell
 git add src-tauri/crates/cc-switch-core/src/provider src-tauri/crates/cc-switch-core/tests/provider_parity.rs
@@ -357,7 +357,7 @@ git commit -m "feat(remote): write canonical providers"
 - Modify: `src-tauri/src/services/provider/live.rs`
 - Modify: `src-tauri/src/services/provider/mod.rs`
 
-- [ ] **Step 1: Write failing live projection tests**
+- [x] **Step 1: Write failing live projection tests**
 
 Create table-driven tests for `claude`, `codex`, `gemini`, `grokbuild`, `opencode`, `openclaw`, and `hermes`. Each test seeds an unrelated key in the live file, switches Provider, and asserts the unrelated key survives. Add this Linux condition test:
 
@@ -372,7 +372,7 @@ fn claude_desktop_switch_is_rejected_before_database_change_on_linux() {
 }
 ```
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 ```powershell
 cargo test -j 1 -p cc-switch-core --test provider_live -- --nocapture
@@ -380,7 +380,7 @@ cargo test -j 1 -p cc-switch-core --test provider_live -- --nocapture
 
 Expected: non-Claude writers and platform capability checks are missing.
 
-- [ ] **Step 3: Extract headless live writers**
+- [x] **Step 3: Extract headless live writers**
 
 Expose a path-explicit API:
 
@@ -408,11 +408,11 @@ Move the application-specific parsing and write logic used by `write_live_snapsh
 
 Every writer must use same-directory temporary files and atomic replacement. `ProviderService::switch` must check platform capability first, commit `is_current`, then project live; a projection failure returns `LIVE_WRITE_FAILED` and leaves the database state visible for reconciliation rather than reporting success.
 
-- [ ] **Step 4: Make desktop Provider services call the shared writer**
+- [x] **Step 4: Make desktop Provider services call the shared writer**
 
 Keep proxy-takeover and Tauri event orchestration in the desktop crate, but replace duplicate filesystem projection with `cc_switch_core::provider::live::project_provider`. Map `CoreError` to `AppError` without exposing secrets.
 
-- [ ] **Step 5: Run Core and desktop Provider suites**
+- [x] **Step 5: Run Core and desktop Provider suites**
 
 ```powershell
 cargo test -j 1 -p cc-switch-core --test provider_live -- --nocapture
@@ -421,7 +421,7 @@ cargo test -j 1 --test provider_service --test provider_commands -- --nocapture
 
 Expected: Core live tests and existing desktop Provider behavior pass.
 
-- [ ] **Step 6: Audit Agent dependencies and commit**
+- [x] **Step 6: Audit Agent dependencies and commit**
 
 ```powershell
 cargo tree -p cc-switch-agent | Select-String -Pattern 'tauri|webkit2gtk|gtk' -CaseSensitive:$false
@@ -444,7 +444,7 @@ git commit -m "refactor(remote): share provider live projection"
 - Modify: `src-tauri/crates/cc-switch-agent/tests/agent_process.rs`
 - Modify: `src-tauri/tests/remote_capabilities.rs`
 
-- [ ] **Step 1: Write failing registry tests for the complete command set**
+- [x] **Step 1: Write failing registry tests for the complete command set**
 
 Assert the registry contains these stable names:
 
@@ -463,7 +463,7 @@ const USAGE_WRITES: &[&str] = &[
 
 Reads must be read-only/idempotent with 30-second timeout. `usage.session_sync` and `usage.codex_rebuild` must be non-idempotent with 300-second timeout. Unknown commands remain denied.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 ```powershell
 cargo test -j 1 --test remote_capabilities -- --nocapture
@@ -471,7 +471,7 @@ cargo test -j 1 --test remote_capabilities -- --nocapture
 
 Expected: Usage commands are absent from `provider_phase()`.
 
-- [ ] **Step 3: Implement the combined registry**
+- [x] **Step 3: Implement the combined registry**
 
 Replace `provider_phase()` with:
 
@@ -487,7 +487,7 @@ impl CommandCapabilityRegistry {
 
 Keep command metadata in protocol crate so desktop runtime and Agent handshake use the same source.
 
-- [ ] **Step 4: Introduce generic dispatch**
+- [x] **Step 4: Introduce generic dispatch**
 
 Add:
 
@@ -507,7 +507,7 @@ pub fn dispatch_command(
 
 Rename `ProviderCommandError` to domain-neutral `CommandError`, preserving stable code mapping. Change Agent handshake and request loop to use `remote_supported()` and `dispatch_command`.
 
-- [ ] **Step 5: Run protocol and Agent tests**
+- [x] **Step 5: Run protocol and Agent tests**
 
 ```powershell
 cargo test -j 1 -p cc-switch-protocol -- --nocapture
@@ -517,7 +517,7 @@ cargo test -j 1 --test remote_capabilities --test remote_protocol --test remote_
 
 Expected: Provider vertical slice still passes and hello capabilities include all declared names.
 
-- [ ] **Step 6: Commit protocol expansion**
+- [x] **Step 6: Commit protocol expansion**
 
 ```powershell
 git add src-tauri/crates/cc-switch-protocol src-tauri/crates/cc-switch-core/src/dispatch.rs src-tauri/crates/cc-switch-core/src/lib.rs src-tauri/crates/cc-switch-agent src-tauri/tests/remote_capabilities.rs
@@ -536,7 +536,7 @@ git commit -m "feat(remote): register provider and usage commands"
 - Modify: `src-tauri/src/services/usage_stats.rs`
 - Modify: `src-tauri/src/services/sql_helpers.rs`
 
-- [ ] **Step 1: Write failing parity tests against one canonical fixture**
+- [x] **Step 1: Write failing parity tests against one canonical fixture**
 
 Seed proxy and session rows with cache tokens, failures, pricing model, data source, and missing Provider IDs. Assert exact serialized results for every read command:
 
@@ -560,7 +560,7 @@ fn usage_queries_match_dashboard_semantics() {
 
 Also compare summary-by-app, trends, Provider stats, model stats, detail, data sources, pricing list, limits, and Provider usage query.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 ```powershell
 cargo test -j 1 -p cc-switch-core --test usage_query -- --nocapture
@@ -568,7 +568,7 @@ cargo test -j 1 -p cc-switch-core --test usage_query -- --nocapture
 
 Expected: `UsageService` and shared DTOs are missing.
 
-- [ ] **Step 3: Move DTOs and pure SQL helpers**
+- [x] **Step 3: Move DTOs and pure SQL helpers**
 
 Move the serializable structs and query SQL from `src-tauri/src/services/usage_stats.rs` into Core. Move `fresh_input_sql`, token semantics constants, Provider-name fallback, data-source normalization, and `row_to_request_log_detail` with Chinese comments documenting column order and legacy-row handling.
 
@@ -589,11 +589,11 @@ impl UsageService {
 
 Reject a serialized logs response above 16 MiB before protocol framing and return `PAYLOAD_TOO_LARGE`.
 
-- [ ] **Step 4: Make desktop Usage queries delegate to Core**
+- [x] **Step 4: Make desktop Usage queries delegate to Core**
 
 Keep Tauri command names and parameter casing unchanged. Desktop wrappers lock the existing database connection, call the shared query functions, and map `CoreError` to `AppError`. Remove duplicate SQL only after parity tests pass.
 
-- [ ] **Step 5: Run Core and desktop Usage regressions**
+- [x] **Step 5: Run Core and desktop Usage regressions**
 
 ```powershell
 cargo test -j 1 -p cc-switch-core --test usage_query -- --nocapture
@@ -603,7 +603,7 @@ cargo test -j 1 --test provider_service -- --nocapture
 
 Expected: shared fixture queries and desktop Usage tests pass.
 
-- [ ] **Step 6: Commit shared Usage reads**
+- [x] **Step 6: Commit shared Usage reads**
 
 ```powershell
 git add src-tauri/crates/cc-switch-core src-tauri/src/services/usage_stats.rs src-tauri/src/services/sql_helpers.rs
@@ -623,7 +623,7 @@ git commit -m "feat(remote): share usage queries"
 - Modify: `src-tauri/src/services/session_usage.rs`
 - Modify: `src-tauri/src/services/session_usage_codex.rs`
 
-- [ ] **Step 1: Write failing mutation and recovery tests**
+- [x] **Step 1: Write failing mutation and recovery tests**
 
 Cover non-negative pricing validation, history backfill, pricing deletion, Provider limits, Provider usage scripts, session sync against the explicit remote HOME, and Codex rebuild backup ordering:
 
@@ -657,7 +657,7 @@ fn cancelled_codex_rebuild_stops_before_reset() {
 }
 ```
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 ```powershell
 cargo test -j 1 -p cc-switch-core --test usage_mutation -- --nocapture
@@ -665,7 +665,7 @@ cargo test -j 1 -p cc-switch-core --test usage_mutation -- --nocapture
 
 Expected: Core mutation/long-operation APIs are absent.
 
-- [ ] **Step 3: Implement headless Usage mutations**
+- [x] **Step 3: Implement headless Usage mutations**
 
 Expose synchronous Core operations suitable for Agent worker threads. Network-backed Provider scripts use a blocking rustls client inside the worker and the same sandboxed script semantics as the desktop service; they must not create a nested Tauri/Tokio dependency:
 
@@ -683,11 +683,11 @@ impl UsageService {
 
 Define `OperationCancellation` as a clonable `Arc<AtomicBool>` with `active()`, `cancelled()`, `cancel()`, and `check()` methods. All filesystem reads derive from `state.home()`. Preserve the existing session synchronization mutex semantics inside one Agent process. Codex rebuild must call `check()` before backup, before reset, and before import; it executes backup, reset, and import in that order and never auto-retries.
 
-- [ ] **Step 4: Make desktop commands delegate to Core**
+- [x] **Step 4: Make desktop commands delegate to Core**
 
 Keep Tauri async boundaries for UI responsiveness, but call the same Core functions inside `spawn_blocking`. Preserve local Usage events after successful writes; Agent responses trigger frontend invalidation instead of Tauri events.
 
-- [ ] **Step 5: Run mutation, command, and Agent tests**
+- [x] **Step 5: Run mutation, command, and Agent tests**
 
 ```powershell
 cargo test -j 1 -p cc-switch-core --test usage_mutation -- --nocapture
@@ -697,7 +697,7 @@ cargo test -j 1 -p cc-switch-agent -- --nocapture
 
 Expected: all mutation and recovery tests pass; Agent process remains headless.
 
-- [ ] **Step 6: Commit Usage writes and long tasks**
+- [x] **Step 6: Commit Usage writes and long tasks**
 
 ```powershell
 git add src-tauri/crates/cc-switch-core src-tauri/src/commands/usage.rs src-tauri/src/commands/provider.rs src-tauri/src/services/session_usage.rs src-tauri/src/services/session_usage_codex.rs
@@ -714,7 +714,7 @@ git commit -m "feat(remote): execute usage operations"
 - Modify: `src-tauri/src/remote/ssh.rs`
 - Modify: `src-tauri/tests/remote_client.rs`
 
-- [ ] **Step 1: Write failing out-of-order, timeout, and cancellation tests**
+- [x] **Step 1: Write failing out-of-order, timeout, and cancellation tests**
 
 Add a fake duplex transport that returns responses in reverse request order and assert each caller receives its own result. Add a request that never responds and assert the client sends a Cancel frame after the capability timeout:
 
@@ -737,7 +737,7 @@ fn timed_out_request_sends_cancel_for_the_same_operation() {
 
 In the Agent process test, start `usage.codex_rebuild`, send `CancelRequest`, and assert the response code is `REMOTE_OPERATION_CANCELLED` while the Agent remains available for a following ping.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 ```powershell
 cargo test -j 1 --test remote_client -- --nocapture
@@ -746,7 +746,7 @@ cargo test -j 1 -p cc-switch-agent --test agent_process -- --nocapture
 
 Expected: the current client blocks on one response, does not enforce `timeout_ms`, and the Agent ignores Cancel frames.
 
-- [ ] **Step 3: Add a typed cancellation frame payload**
+- [x] **Step 3: Add a typed cancellation frame payload**
 
 ```rust
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -759,7 +759,7 @@ pub struct CancelRequest {
 
 Keep `RpcRequest.operation_id` populated for every write and long read. Request IDs identify responses; operation IDs identify cancellation and must never be reused.
 
-- [ ] **Step 4: Implement a multiplexed desktop client**
+- [x] **Step 4: Implement a multiplexed desktop client**
 
 Split `RemoteSession` into:
 
@@ -770,11 +770,11 @@ Split `RemoteSession` into:
 
 `invoke_with_id` must accept both IDs, call `recv_timeout`, send `FrameKind::Cancel` on timeout, remove the pending entry, and return `REMOTE_OPERATION_TIMEOUT`. EOF fails every pending request with `REMOTE_OFFLINE`.
 
-- [ ] **Step 5: Run Agent requests in cancellable workers**
+- [x] **Step 5: Run Agent requests in cancellable workers**
 
 Change the Agent session loop to own `Arc<HeadlessState>`, an `Arc<Mutex<W>>`, and an operation registry of cancellation tokens. Each Request runs in a worker thread and writes its response under the writer lock. The main reader loop remains free to process Ping and Cancel frames; Cancel looks up the operation ID and flips its token. On stdin EOF, cancel and join all workers before process exit.
 
-- [ ] **Step 6: Run protocol/client/Agent regressions**
+- [x] **Step 6: Run protocol/client/Agent regressions**
 
 ```powershell
 cargo test -j 1 -p cc-switch-protocol -- --nocapture
@@ -784,7 +784,7 @@ cargo test -j 1 -p cc-switch-agent -- --nocapture
 
 Expected: reverse-order responses, timeout cancellation, post-cancel ping, and EOF cleanup all pass.
 
-- [ ] **Step 7: Commit multiplexing and cancellation**
+- [x] **Step 7: Commit multiplexing and cancellation**
 
 ```powershell
 git add src-tauri/crates/cc-switch-protocol/src/protocol.rs src-tauri/crates/cc-switch-agent src-tauri/src/remote/client.rs src-tauri/src/remote/ssh.rs src-tauri/tests/remote_client.rs
@@ -801,7 +801,7 @@ git commit -m "feat(remote): cancel timed out operations"
 - Create: `src-tauri/tests/remote_generation.rs`
 - Modify: `src-tauri/tests/remote_runtime.rs`
 
-- [ ] **Step 1: Write failing stale-generation tests**
+- [x] **Step 1: Write failing stale-generation tests**
 
 ```rust
 #[test]
@@ -817,7 +817,7 @@ fn rejects_request_from_previous_runtime_generation() {
 
 Add a delayed-response test that switches generation after send and verifies the result is rejected after receive.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 ```powershell
 cargo test -j 1 --test remote_generation -- --nocapture
@@ -825,7 +825,7 @@ cargo test -j 1 --test remote_generation -- --nocapture
 
 Expected: `invoke_remote` has no generation parameter and accepts stale work.
 
-- [ ] **Step 3: Implement double-sided generation checks**
+- [x] **Step 3: Implement double-sided generation checks**
 
 Change the API to:
 
@@ -840,11 +840,11 @@ pub fn invoke_remote(
 
 Check the snapshot before locking the session and again after the response arrives. Update `remote_invoke` to require camelCase `generation`. Map mismatches to `STALE_RUNTIME`; never resend writes.
 
-- [ ] **Step 4: Use the combined capability timeout**
+- [x] **Step 4: Use the combined capability timeout**
 
 Replace every `provider_phase()` runtime lookup with `remote_supported()`. Ensure Usage long tasks receive 300-second timeout and read commands 30 seconds.
 
-- [ ] **Step 5: Run remote gateway regressions**
+- [x] **Step 5: Run remote gateway regressions**
 
 ```powershell
 cargo test -j 1 --test remote_generation --test remote_runtime --test remote_client -- --nocapture
@@ -852,7 +852,7 @@ cargo test -j 1 --test remote_generation --test remote_runtime --test remote_cli
 
 Expected: stale requests never reach the session and existing offline behavior remains stable.
 
-- [ ] **Step 6: Commit generation enforcement**
+- [x] **Step 6: Commit generation enforcement**
 
 ```powershell
 git add src-tauri/src/commands/remote.rs src-tauri/src/remote src-tauri/tests/remote_generation.rs src-tauri/tests/remote_runtime.rs
@@ -867,7 +867,7 @@ git commit -m "fix(remote): reject stale runtime requests"
 - Create: `src/lib/api/usage.test.ts`
 - Modify: `tests/msw/tauriMocks.ts`
 
-- [ ] **Step 1: Write failing local/remote routing tests**
+- [x] **Step 1: Write failing local/remote routing tests**
 
 Mock Tauri invoke and assert both paths:
 
@@ -891,7 +891,7 @@ it("keeps usage summary local in local mode", async () => {
 
 Add one assertion for every Usage API method and verify offline mode rejects without invoking a local business command.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 ```powershell
 pnpm test:unit -- src/lib/api/usage.test.ts
@@ -899,7 +899,7 @@ pnpm test:unit -- src/lib/api/usage.test.ts
 
 Expected: Usage methods call direct `invoke` and remote routing assertions fail.
 
-- [ ] **Step 3: Extend appInvoke with generation**
+- [x] **Step 3: Extend appInvoke with generation**
 
 ```ts
 return await localInvoke<T>("remote_invoke", {
@@ -911,11 +911,11 @@ return await localInvoke<T>("remote_invoke", {
 
 Keep local-only commands explicit. Do not add a fallback from remote errors to local invoke.
 
-- [ ] **Step 4: Map the complete Usage API**
+- [x] **Step 4: Map the complete Usage API**
 
 Replace direct imports of Tauri `invoke` with `appInvoke` and map every method to the command names declared in Task 6. Preserve local Tauri command names and existing argument casing.
 
-- [ ] **Step 5: Run unit tests and typecheck**
+- [x] **Step 5: Run unit tests and typecheck**
 
 ```powershell
 pnpm test:unit -- src/lib/api/usage.test.ts
@@ -924,7 +924,7 @@ pnpm typecheck
 
 Expected: routing tests and TypeScript compilation pass.
 
-- [ ] **Step 6: Commit Usage routing**
+- [x] **Step 6: Commit Usage routing**
 
 ```powershell
 git add src/lib/runtime/invoke.ts src/lib/api/usage.ts src/lib/api/usage.test.ts tests/msw/tauriMocks.ts
@@ -942,7 +942,7 @@ git commit -m "feat(remote): route usage API by target"
 - Modify: `src/hooks/useUsageEventBridge.ts`
 - Modify: `src/hooks/useUsageCacheBridge.ts`
 
-- [ ] **Step 1: Write failing query-scope tests**
+- [x] **Step 1: Write failing query-scope tests**
 
 ```ts
 it("creates different scopes for local and remote generations", () => {
@@ -954,7 +954,7 @@ it("creates different scopes for local and remote generations", () => {
 
 Render one Usage hook, switch snapshots, and assert TanStack Query performs a second request under a different key rather than reusing local data.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 ```powershell
 pnpm test:unit -- src/lib/runtime/queryScope.test.ts
@@ -962,7 +962,7 @@ pnpm test:unit -- src/lib/runtime/queryScope.test.ts
 
 Expected: `runtimeQueryScope` is missing and current Usage keys are target-agnostic.
 
-- [ ] **Step 3: Implement a synchronous runtime scope helper**
+- [x] **Step 3: Implement a synchronous runtime scope helper**
 
 ```ts
 export type RuntimeQueryScope = readonly ["local", number] |
@@ -980,11 +980,11 @@ export function runtimeQueryScope(snapshot = getRuntimeSnapshot()): RuntimeQuery
 
 Include the scope immediately after each domain root in Provider and Usage query keys.
 
-- [ ] **Step 4: Cancel old queries during target transitions**
+- [x] **Step 4: Cancel old queries during target transitions**
 
 Before publishing connecting state, call `queryClient.cancelQueries()`; after backend confirmation, clear environment-scoped queries and publish the final snapshot. Event bridges must invalidate only the current runtime scope.
 
-- [ ] **Step 5: Run frontend regressions**
+- [x] **Step 5: Run frontend regressions**
 
 ```powershell
 pnpm test:unit -- src/lib/runtime/queryScope.test.ts src/lib/api/usage.test.ts
@@ -995,7 +995,7 @@ pnpm format:check
 
 Expected: all unit tests, typecheck, and formatting pass.
 
-- [ ] **Step 6: Commit cache isolation**
+- [x] **Step 6: Commit cache isolation**
 
 ```powershell
 git add src/lib/runtime src/lib/query src/contexts/RuntimeTargetContext.tsx src/hooks
@@ -1011,7 +1011,7 @@ git commit -m "fix(remote): isolate target query caches"
 - Modify: `src-tauri/tests/remote_agent_minimal.rs`
 - Create: `src-tauri/tests/remote_provider_usage.rs`
 
-- [ ] **Step 1: Write a process-level Provider/Usage Agent test**
+- [x] **Step 1: Write a process-level Provider/Usage Agent test**
 
 Start `cc-switch-agent --stdio` with a canonical fixture HOME, perform hello, list an existing Provider, switch it, query Usage summary/logs, update pricing, and assert unknown commands are denied. Close stdin and assert process cleanup.
 
@@ -1028,7 +1028,7 @@ for code in [
 }
 ```
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 ```powershell
 cd src-tauri
@@ -1037,11 +1037,11 @@ cargo test -j 1 --test remote_provider_usage -- --nocapture
 
 Expected: one or more command mappings/error codes are absent until all adapters are complete.
 
-- [ ] **Step 3: Complete error mapping and sanitization**
+- [x] **Step 3: Complete error mapping and sanitization**
 
 Map Core errors through Agent `RpcError`, SSH client, `RemoteRuntimeError`, and serialized Tauri payload without flattening stable codes. Preserve the 4096-character/control-character sanitization and never include settings JSON or tokens.
 
-- [ ] **Step 4: Run full scoped Rust verification**
+- [x] **Step 4: Run full scoped Rust verification**
 
 ```powershell
 cargo fmt --check
@@ -1054,7 +1054,7 @@ cargo clippy -j 1 --workspace --all-targets -- -D warnings
 
 Expected: all commands exit 0 with no warnings.
 
-- [ ] **Step 5: Commit end-to-end adapters**
+- [x] **Step 5: Commit end-to-end adapters**
 
 ```powershell
 git add src-tauri/src/remote src-tauri/src/commands/remote.rs src-tauri/tests
@@ -1068,11 +1068,11 @@ git commit -m "test(remote): cover provider usage parity"
 - Verify: `.github/workflows/ci.yml`
 - Verify: `.github/workflows/release.yml`
 
-- [ ] **Step 1: Stop the Tauri development process tree**
+- [x] **Step 1: Stop the Tauri development process tree**
 
 Identify the `cc-switch.exe` parent chain and stop only the repository's Tauri/Vite tree so Windows releases Rust artifacts. Record the prior dev environment paths for restart.
 
-- [ ] **Step 2: Build or obtain fresh x86_64 and aarch64 musl Agents**
+- [x] **Step 2: Build or obtain fresh x86_64 and aarch64 musl Agents**
 
 Use the existing CI workflow when local cross tooling is unavailable. Verify both ELF files are static using the workflow's ELF-header checks, then set:
 
@@ -1081,7 +1081,7 @@ $env:CC_SWITCH_AGENT_X86_64_PATH=(Resolve-Path 'src-tauri/target/downloaded-agen
 $env:CC_SWITCH_AGENT_AARCH64_PATH=(Resolve-Path 'src-tauri/target/downloaded-agent-artifacts/linux-aarch64/cc-switch-agent').Path
 ```
 
-- [ ] **Step 3: Run a credential-safe live integration probe**
+- [x] **Step 3: Run a credential-safe live integration probe**
 
 The opt-in test must connect to `root@172.16.0.108`, then assert:
 
@@ -1094,7 +1094,7 @@ The opt-in test must connect to `root@172.16.0.108`, then assert:
 
 The probe must never print API keys, settings JSON, request bodies, or full database rows.
 
-- [ ] **Step 4: Restart development mode with embedded Agent paths**
+- [x] **Step 4: Restart development mode with embedded Agent paths**
 
 ```powershell
 $env:CC_SWITCH_AGENT_X86_64_PATH=(Resolve-Path 'src-tauri/target/downloaded-agent-artifacts/linux-x86_64/cc-switch-agent').Path
@@ -1104,7 +1104,7 @@ Start-Process -FilePath 'D:/app/node/pnpm.cmd' -ArgumentList @('run','dev') -Wor
 
 Expected: Vite returns HTTP 200 at `http://localhost:3000/` and `src-tauri/target/debug/cc-switch.exe` is running.
 
-- [ ] **Step 5: Perform final repository verification**
+- [x] **Step 5: Perform final repository verification**
 
 ```powershell
 git diff --check
@@ -1114,7 +1114,7 @@ git log --oneline -15
 
 Expected: no temporary live-probe source, root-level diagnostic `target/`, secrets, or untracked Agent binaries. Only intentional commits and ignored build output remain.
 
-- [ ] **Step 6: Commit any verified live-only correction separately**
+- [x] **Step 6: Commit any verified live-only correction separately**
 
 If Step 3 required a source correction, stage only its owned files and use:
 
@@ -1128,13 +1128,13 @@ If no correction was required, do not create an empty commit.
 
 ## Completion Checklist
 
-- [ ] Existing remote desktop schema opens without mutation.
-- [ ] Remote Provider lists include full fields, endpoints, and current state for all eight app IDs.
-- [ ] Linux-supported Provider switches update only the selected host and project the correct live format.
-- [ ] Linux Claude Desktop switching fails before database mutation with `CAPABILITY_UNAVAILABLE`.
-- [ ] Every Usage dashboard read/write method routes through the selected runtime.
-- [ ] Long Usage operations use 300-second non-retrying capabilities, honor Cancel frames, and preserve backups on failure.
-- [ ] Runtime generation and query keys reject cross-target stale results.
-- [ ] Agent dependency tree contains no desktop GUI stack.
-- [ ] Scoped Rust, frontend, Clippy, formatting, and real SSH verification pass.
-- [ ] Tauri/Vite development state is restored with embedded Agent artifacts.
+- [x] Existing remote desktop schema opens without mutation.
+- [x] Remote Provider lists include full fields, endpoints, and current state for all eight app IDs.
+- [x] Linux-supported Provider switches update only the selected host and project the correct live format.
+- [x] Linux Claude Desktop switching fails before database mutation with `CAPABILITY_UNAVAILABLE`.
+- [x] Every Usage dashboard read/write method routes through the selected runtime.
+- [x] Long Usage operations use 300-second non-retrying capabilities, honor Cancel frames, and preserve backups on failure.
+- [x] Runtime generation and query keys reject cross-target stale results.
+- [x] Agent dependency tree contains no desktop GUI stack.
+- [x] Scoped Rust, frontend, Clippy, formatting, and real SSH verification pass.
+- [x] Tauri/Vite development state is restored with embedded Agent artifacts.
