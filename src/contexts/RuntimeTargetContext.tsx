@@ -37,7 +37,9 @@ interface RuntimeTargetContextValue {
   refreshTargets: () => Promise<void>;
   upsertTarget: (target: RemoteTargetConfig) => Promise<void>;
   deleteTarget: (targetId: string) => Promise<void>;
-  setActiveTarget: (targetId?: string) => Promise<void>;
+  setActiveTarget: (targetId?: string, password?: string) => Promise<void>;
+  saveTargetPassword: (targetId: string, password: string) => Promise<boolean>;
+  deleteTargetPassword: (targetId: string) => Promise<boolean>;
 }
 
 const RuntimeTargetContext = createContext<RuntimeTargetContextValue | null>(
@@ -91,14 +93,14 @@ export function RuntimeTargetProvider({ children }: { children: ReactNode }) {
   }, [queryClient]);
 
   const setActiveTarget = useCallback(
-    async (targetId?: string) => {
+    async (targetId?: string, password?: string) => {
       const previous = getRuntimeSnapshot();
       // 先等待取消完成再发布 connecting，否则旧 queryFn 可能读取新 runtime 快照，
-      // 形成“旧 key、却访问新主机”的混合请求。
+      // 形成"旧 key、却访问新主机"的混合请求。
       await queryClient.cancelQueries();
       setRuntimeSnapshot(createRuntimeTransition(previous, targetId));
       try {
-        const next = await remoteApi.setActiveTarget(targetId);
+        const next = await remoteApi.setActiveTarget(targetId, password);
         clearEnvironmentQueryCaches(queryClient);
         setRuntimeSnapshot(next);
       } catch (error) {
@@ -115,6 +117,24 @@ export function RuntimeTargetProvider({ children }: { children: ReactNode }) {
       }
     },
     [queryClient],
+  );
+
+  const saveTargetPassword = useCallback(
+    async (targetId: string, password: string) => {
+      const saved = await remoteApi.saveTargetPassword(targetId, password);
+      await refreshTargets();
+      return saved;
+    },
+    [refreshTargets],
+  );
+
+  const deleteTargetPassword = useCallback(
+    async (targetId: string) => {
+      const deleted = await remoteApi.deleteTargetPassword(targetId);
+      await refreshTargets();
+      return deleted;
+    },
+    [refreshTargets],
   );
 
   const upsertTarget = useCallback(
@@ -142,6 +162,8 @@ export function RuntimeTargetProvider({ children }: { children: ReactNode }) {
       upsertTarget,
       deleteTarget,
       setActiveTarget,
+      saveTargetPassword,
+      deleteTargetPassword,
     }),
     [
       snapshot,
@@ -150,6 +172,8 @@ export function RuntimeTargetProvider({ children }: { children: ReactNode }) {
       upsertTarget,
       deleteTarget,
       setActiveTarget,
+      saveTargetPassword,
+      deleteTargetPassword,
     ],
   );
 

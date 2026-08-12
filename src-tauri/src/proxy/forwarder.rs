@@ -1612,6 +1612,17 @@ impl RequestForwarder {
         // 精确认证材料。实际日志永远不输出这些值。
         let mut log_secrets: Vec<String> = Vec::new();
         let mut auth_headers = if let Some(mut auth) = adapter.extract_auth(provider) {
+            // 诊断：认证策略与 key 前缀（脱敏），用于排查远程路由/网关认证不匹配。
+            let key_preview = auth
+                .api_key
+                .chars()
+                .take(8)
+                .collect::<String>();
+            log::info!(
+                "[auth-dbg] provider=`{}` strategy={:?} key_prefix={key_preview}...",
+                provider.name,
+                auth.strategy
+            );
             // GitHub Copilot 特殊处理：从 CopilotAuthManager 获取真实 token
             if auth.strategy == AuthStrategy::GitHubCopilot {
                 if let Some(app_handle) = &self.app_handle {

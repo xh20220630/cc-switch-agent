@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
   CirclePlus,
+  KeyRound,
   LoaderCircle,
   Pencil,
   PlugZap,
@@ -31,11 +32,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useRuntimeTarget } from "@/contexts/RuntimeTargetContext";
 import { remoteApi } from "@/lib/api/remote";
+import { getRuntimeSnapshot } from "@/lib/runtime/store";
 import type {
   DiscoveredSshTarget,
   RemoteTargetConfig,
 } from "@/lib/runtime/types";
-import { extractErrorMessage } from "@/utils/errorUtils";
+import { extractErrorMessage, extractErrorCode } from "@/utils/errorUtils";
 
 interface TargetFormState {
   id: string;
@@ -44,6 +46,7 @@ interface TargetFormState {
   username: string;
   port: string;
   identityFile: string;
+  password: string;
 }
 
 const EMPTY_FORM: TargetFormState = {
@@ -53,7 +56,17 @@ const EMPTY_FORM: TargetFormState = {
   username: "",
   port: "",
   identityFile: "",
+  password: "",
 };
+
+// 首次连接未知主机时,需要先征求用户信任(类似 XShell)。
+interface TrustCandidate {
+  target: RemoteTargetConfig;
+  fingerprints: string[];
+  busy: boolean;
+  // 用户确认信任后要重试的原始操作(测试连接或正式连接)。
+  retry: () => void;
+}
 
 function toForm(target?: RemoteTargetConfig): TargetFormState {
   if (!target) return EMPTY_FORM;
@@ -64,6 +77,7 @@ function toForm(target?: RemoteTargetConfig): TargetFormState {
     username: target.username ?? "",
     port: target.port?.toString() ?? "",
     identityFile: target.identityFile ?? "",
+    password: "",
   };
 }
 
@@ -77,13 +91,20 @@ function toTarget(form: TargetFormState): RemoteTargetConfig {
     username: form.username.trim() || undefined,
     port,
     identityFile: form.identityFile.trim() || undefined,
+    password: form.password || undefined,
   };
 }
 
 export function RemoteTargetsSettings() {
   const { t } = useTranslation();
-  const { snapshot, targets, upsertTarget, deleteTarget, setActiveTarget } =
-    useRuntimeTarget();
+  const {
+    snapshot,
+    targets,
+    upsertTarget,
+    deleteTarget,
+    setActiveTarget,
+    saveTargetPassword,
+  } = useRuntimeTarget();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [form, setForm] = useState<TargetFormState>(EMPTY_FORM);
@@ -96,6 +117,54 @@ export function RemoteTargetsSettings() {
   const [discoveryError, setDiscoveryError] = useState<string>();
   const [connectingId, setConnectingId] = useState<string>();
   const [deleteCandidate, setDeleteCandidate] = useState<RemoteTargetConfig>();
+  // 需要输入密码的连接流程：先弹密码框，成功后再询问是否保存。
+  const [passwordTarget, setPasswordTarget] = useState<RemoteTargetConfig>();
+  const [passwordInput, setPasswordInput] = useState("");
+  const [passwordBusy, setPasswordBusy] = useState(false);
+  const [savePromptTarget, setSavePromptTarget] =
+    useState<RemoteTargetConfig>();
+  const [promptPassword, setPromptPassword] = useState("");
+  const [trustCandidate, setTrustCandidate] = useState<TrustCandidate>();
+
+  // HOST_KEY_NOT_TRUSTED 时弹出信任确认；指纹展示用只读接口，确认后才写入 known_hosts。
+  const promptTrustHost = async (
+    target: RemoteTargetConfig,
+    retry: () => void,
+  ) => {
+    setTrustCandidate({ target, fingerprints: [], busy: true, retry });
+    try {
+      const fingerprints = await remoteApi.getHostKeyFingerprints(target);
+      setTrustCandidate({ target, fingerprints, busy: false, retry });
+    } catch (error) {
+      // 指纹也读不到时直接提示错误，不再弹信任框。
+      setTrustCandidate(undefined);
+      toast.error(extractErrorMessage(error));
+    }
+  };
+
+  const handleHostKeyError = async (
+    error: unknown,
+    target: RemoteTargetConfig,
+    retry: () => void,
+  ): Promise<boolean> => {
+    if (extractErrorCode(error) !== "HOST_KEY_NOT_TRUSTED") return false;
+    await promptTrustHost(target, retry);
+    return true;
+  };
+
+  const handleConfirmTrust = async () => {
+    if (!trustCandidate) return;
+    const { target, retry } = trustCandidate;
+    setTrustCandidate({ ...trustCandidate, busy: true });
+    try {
+      await remoteApi.trustTargetHost(target);
+      setTrustCandidate(undefined);
+      retry();
+    } catch (error) {
+      setTrustCandidate(undefined);
+      toast.error(extractErrorMessage(error));
+    }
+  };
 
   const valid = useMemo(() => {
     const port = form.port.trim();
@@ -158,6 +227,7 @@ export function RemoteTargetsSettings() {
       username: target.username ?? "",
       port: target.port?.toString() ?? "",
       identityFile: target.identityFile ?? "",
+      password: "",
     });
     setAdvancedOpen(
       Boolean(target.username || target.port || target.identityFile),
@@ -192,18 +262,79 @@ export function RemoteTargetsSettings() {
         }),
       );
     } catch (error) {
-      toast.error(extractErrorMessage(error));
+      const handled = await handleHostKeyError(
+        error,
+        toTarget({ ...form, id: form.id || "connection-test" }),
+        () => void handleTest(),
+      );
+      if (handled) {
+        // 信任弹窗接管；连接成功提示由重试流程触发。
+      } else {
+        toast.error(extractErrorMessage(error));
+      }
     } finally {
       setTesting(false);
     }
   };
 
-  const handleConnect = async (targetId: string) => {
-    setConnectingId(targetId);
+  const connectWithPassword = async (
+    target: RemoteTargetConfig,
+    password: string,
+  ) => {
+    setPasswordBusy(true);
     try {
-      await setActiveTarget(targetId);
+      await setActiveTarget(target.id, password);
+      // 上下文在失败时只 toast 并保留离线快照；只有进入 online 才算登录成功，
+      // 成功后才询问是否把密码保存到系统安全存储（登录凭据），不强制。
+      if (getRuntimeSnapshot().status === "online") {
+        setSavePromptTarget(target);
+        setPromptPassword(password);
+      }
+    } catch (error) {
+      const handled = await handleHostKeyError(error, target, () => {
+        void connectWithPassword(target, password);
+      });
+      if (!handled) {
+        toast.error(extractErrorMessage(error));
+      }
     } finally {
-      setConnectingId(undefined);
+      setPasswordBusy(false);
+      setPasswordInput("");
+      setPasswordTarget(undefined);
+    }
+  };
+
+  const handleConnect = (target: RemoteTargetConfig) => {
+    // 已有私钥或已保存密码时直接连接；否则先收集密码。
+    if (target.identityFile || target.hasSavedPassword) {
+      setConnectingId(target.id);
+      void setActiveTarget(target.id)
+        .catch((error) =>
+          handleHostKeyError(error, target, () => {
+            void handleConnect(target);
+          }).then((handled) => {
+            if (!handled) toast.error(extractErrorMessage(error));
+          }),
+        )
+        .finally(() => setConnectingId(undefined));
+    } else {
+      setPasswordInput("");
+      setPasswordTarget(target);
+    }
+  };
+
+  const handleSavePassword = async () => {
+    if (!savePromptTarget) return;
+    try {
+      await saveTargetPassword(savePromptTarget.id, promptPassword);
+      toast.success(
+        t("remote.passwordSaved", { defaultValue: "Password saved" }),
+      );
+    } catch (error) {
+      toast.error(extractErrorMessage(error));
+    } finally {
+      setSavePromptTarget(undefined);
+      setPromptPassword("");
     }
   };
 
@@ -265,6 +396,11 @@ export function RemoteTargetsSettings() {
                     {target.username ? `${target.username}@` : ""}
                     {target.hostAlias}
                     {target.port ? `:${target.port}` : ""}
+                    {target.hasSavedPassword && (
+                      <span className="ml-1 inline-flex items-center gap-1">
+                        <KeyRound className="h-3 w-3" />
+                      </span>
+                    )}
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
@@ -272,12 +408,18 @@ export function RemoteTargetsSettings() {
                     variant="ghost"
                     size="icon"
                     disabled={active || connecting}
-                    onClick={() => void handleConnect(target.id)}
+                    onClick={() => handleConnect(target)}
                     aria-label={t("remote.connectNamed", {
                       defaultValue: `Connect ${target.name}`,
                       name: target.name,
                     })}
-                    title={t("remote.connect", { defaultValue: "Connect" })}
+                    title={
+                      target.hasSavedPassword
+                        ? t("remote.connectWithSavedPassword", {
+                            defaultValue: "Connect (saved password)",
+                          })
+                        : t("remote.connect", { defaultValue: "Connect" })
+                    }
                   >
                     {connecting ? (
                       <LoaderCircle className="h-4 w-4 animate-spin" />
@@ -494,6 +636,25 @@ export function RemoteTargetsSettings() {
                     autoComplete="off"
                   />
                 </div>
+                <div className="space-y-2">
+                  <Label htmlFor="remote-password">
+                    {t("remote.fields.password", {
+                      defaultValue: "Password",
+                    })}
+                  </Label>
+                  <Input
+                    id="remote-password"
+                    type="password"
+                    value={form.password}
+                    onChange={(event) =>
+                      updateField("password", event.target.value)
+                    }
+                    placeholder={t("remote.fields.passwordHint", {
+                      defaultValue: "Optional; used when no private key",
+                    })}
+                    autoComplete="new-password"
+                  />
+                </div>
               </CollapsibleContent>
             </Collapsible>
           </div>
@@ -536,6 +697,118 @@ export function RemoteTargetsSettings() {
             .catch((error) => toast.error(extractErrorMessage(error)));
         }}
       />
+
+      <Dialog
+        open={Boolean(passwordTarget)}
+        onOpenChange={(open) => !open && setPasswordTarget(undefined)}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader className="pr-16">
+            <DialogTitle>
+              {t("remote.passwordTitle", {
+                defaultValue: "Password for {{name}}",
+                name: passwordTarget?.name ?? "",
+              })}
+            </DialogTitle>
+            <DialogDescription>
+              {t("remote.passwordDescription", {
+                defaultValue:
+                  "Enter the SSH password for this server. It is used for this connection only.",
+              })}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 px-6 py-4">
+            <Label htmlFor="connect-password">
+              {t("remote.fields.password", { defaultValue: "Password" })}
+            </Label>
+            <Input
+              id="connect-password"
+              type="password"
+              value={passwordInput}
+              onChange={(event) => setPasswordInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && passwordTarget && passwordInput) {
+                  void connectWithPassword(passwordTarget, passwordInput);
+                }
+              }}
+              autoFocus
+              autoComplete="new-password"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={passwordBusy}
+              onClick={() => setPasswordTarget(undefined)}
+            >
+              {t("common.cancel", { defaultValue: "Cancel" })}
+            </Button>
+            <Button
+              disabled={!passwordInput || passwordBusy}
+              onClick={() => {
+                if (passwordTarget) {
+                  void connectWithPassword(passwordTarget, passwordInput);
+                }
+              }}
+            >
+              {passwordBusy && (
+                <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
+              )}
+              {t("remote.connect", { defaultValue: "Connect" })}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmDialog
+        isOpen={Boolean(savePromptTarget)}
+        variant="info"
+        title={t("remote.savePasswordTitle", {
+          defaultValue: "Save password?",
+        })}
+        message={t("remote.savePasswordMessage", {
+          defaultValue:
+            "Login succeeded. Save the password on this computer using the system secure storage, so you can connect without entering it next time?",
+        })}
+        confirmText={t("remote.savePasswordConfirm", {
+          defaultValue: "Save password",
+        })}
+        cancelText={t("common.cancel", { defaultValue: "Cancel" })}
+        onCancel={() => {
+          setSavePromptTarget(undefined);
+          setPromptPassword("");
+        }}
+        onConfirm={() => void handleSavePassword()}
+      />
+
+      <ConfirmDialog
+        isOpen={Boolean(trustCandidate)}
+        variant="info"
+        title={t("remote.trustHostTitle", {
+          defaultValue: "Trust this server?",
+        })}
+        message={t("remote.trustHostMessage", {
+          defaultValue:
+            "The host key of {{name}} ({{host}}) is not trusted yet. Verify the fingerprints below, then continue.",
+          name: trustCandidate?.target.name ?? "",
+          host: trustCandidate?.target.hostAlias ?? "",
+        })}
+        confirmText={t("remote.trustHostConfirm", {
+          defaultValue: "Trust and continue",
+        })}
+        cancelText={t("common.cancel", { defaultValue: "Cancel" })}
+        busy={trustCandidate?.busy}
+        onCancel={() => setTrustCandidate(undefined)}
+        onConfirm={() => void handleConfirmTrust()}
+      >
+        {trustCandidate && trustCandidate.fingerprints.length > 0 && (
+          <div className="mt-2 rounded-md border border-border/60 bg-muted/40 p-3 font-mono text-xs text-muted-foreground">
+            {trustCandidate.fingerprints.map((fingerprint, index) => (
+              <p key={`${fingerprint}-${index}`}>{fingerprint}</p>
+            ))}
+          </div>
+        )}
+      </ConfirmDialog>
     </section>
   );
 }

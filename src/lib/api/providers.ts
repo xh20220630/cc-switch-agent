@@ -106,10 +106,12 @@ export const providersApi = {
     });
   },
 
-  async switch(id: string, appId: AppId): Promise<SwitchResult> {
+  async switch(id: string, appId: AppId, provider?: Provider): Promise<SwitchResult> {
+    // 远程模式下附带完整 provider 快照, 供桌面端本地路由改写与代理转发同步;
+    // 本地模式不需要(后端从本地 DB 读)。
     return await appInvoke(
       "switch_provider",
-      { id, app: appId },
+      { id, app: appId, ...(provider ? { provider } : {}) },
       { remoteCommand: "provider.switch" },
     );
   },

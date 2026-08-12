@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { UsageHero } from "./UsageHero";
 import { UsageTrendChart } from "./UsageTrendChart";
@@ -104,6 +104,9 @@ export function UsageDashboard({
   );
   const [showRebuildConfirm, setShowRebuildConfirm] = useState(false);
   const [rebuildingCodex, setRebuildingCodex] = useState(false);
+  const [syncingSessions, setSyncingSessions] = useState(false);
+  // 跟踪已自动同步过的远端 scope，避免进入页面/切换刷新重复触发
+  const autoSyncedScopeRef = useRef<string | null>(null);
 
   useEffect(() => {
     setRefreshIntervalMs(normalizeRefreshInterval(savedRefreshIntervalMs));
@@ -128,6 +131,51 @@ export function UsageDashboard({
   // 后端写入新日志时 emit `usage-log-recorded`，本 hook 立刻 invalidate 所有
   // usage 查询，实现实时刷新（仅在 Dashboard 挂载时生效，离开页面自动取消监听）
   useUsageEventBridge();
+
+  // 手动同步按钮 + 远端模式下自动同步一次。本机模式由桌面后台 60 秒轮询自动
+  // 同步会话用量；远端 Agent 没有常驻调度器，若不在此处主动发起 `usage.session_sync`
+  // 远端会话用量永远不会进入远端库，Usage 统计会一直为空。
+  const syncSessionUsage = useCallback(async () => {
+    setSyncingSessions(true);
+    try {
+      const result = await usageApi.syncSessionUsage();
+      await queryClient.invalidateQueries({ queryKey: usageKeys.all(scope) });
+      const message = t("usage.sessionSync.completed", {
+        imported: result.imported,
+        errors: result.errors.length,
+      });
+      if (result.errors.length > 0) {
+        toast.warning(message);
+      } else {
+        toast.success(message);
+      }
+    } catch (error) {
+      toast.error(
+        t("usage.sessionSync.failed", {
+          error: String(error),
+        }),
+      );
+    } finally {
+      setSyncingSessions(false);
+    }
+  }, [queryClient, scope, t]);
+
+  // 远端模式下进入页面自动同步一次：后端在连接成功时已同步过一次，进入页面再兜底
+  // 一次能覆盖连接后新增的会话；每个 scope 只触发一次，避免 30 秒轮询链路反复打扰。
+  useEffect(() => {
+    if (scope[0] !== "remote") return;
+    const scopeKey = scope.join(":");
+    if (autoSyncedScopeRef.current === scopeKey) return;
+    autoSyncedScopeRef.current = scopeKey;
+    void usageApi
+      .syncSessionUsage()
+      .then(() =>
+        queryClient.invalidateQueries({ queryKey: usageKeys.all(scope) }),
+      )
+      .catch(() => {
+        // 自动同步失败不打扰用户，保留下一次手动同步入口。
+      });
+  }, [queryClient, scope]);
 
   const changeRefreshInterval = async (next: number) => {
     const normalized = normalizeRefreshInterval(next);
@@ -337,6 +385,22 @@ export function UsageDashboard({
           </Select>
 
           <div className="flex items-center gap-2 ml-auto lg:ml-0">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void syncSessionUsage()}
+              disabled={syncingSessions}
+              title={t("usage.sessionSync.title")}
+              className="h-9 shrink-0 gap-1.5 text-xs"
+            >
+              {syncingSessions ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3.5 w-3.5 shrink-0" />
+              )}
+              {t("usage.sessionSync.action")}
+            </Button>
+
             <Select
               value={String(refreshIntervalMs)}
               onValueChange={(v) => changeRefreshInterval(Number(v))}

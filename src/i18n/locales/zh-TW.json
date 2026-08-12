@@ -1489,6 +1489,12 @@
       "completed": "重建完成：匯入 {{imported}} 筆，錯誤 {{errors}}，疑似重複 {{suspected}}，暫緩檔案 {{deferred}}",
       "failed": "Codex 用量重建失敗：{{error}}"
     },
+    "sessionSync": {
+      "title": "同步工作階段用量",
+      "action": "同步工作階段",
+      "completed": "工作階段用量同步完成：匯入 {{imported}} 筆，錯誤 {{errors}}",
+      "failed": "工作階段用量同步失敗：{{error}}"
+    },
     "totalRecords": "共 {{total}} 筆紀錄",
     "goToPage": "跳轉",
     "pageInputPlaceholder": "頁碼",
@@ -2998,13 +3004,26 @@
     },
     "deleteTitle": "刪除伺服器",
     "deleteMessage": "確定刪除 {{name}}？",
+    "passwordTitle": "{{name}} 的連線密碼",
+    "passwordDescription": "輸入該伺服器的 SSH 密碼，僅本次連線使用。",
+    "savePasswordTitle": "是否儲存密碼？",
+    "savePasswordMessage": "登入成功。是否將密碼儲存到本機系統安全儲存中，下次連線無需再次輸入？",
+    "savePasswordConfirm": "儲存密碼",
+    "passwordSaved": "密碼已儲存",
+    "connectWithSavedPassword": "連線（已儲存密碼）",
+    "trustHostTitle": "是否信任該伺服器？",
+    "trustHostMessage": "{{name}}（{{host}}）的主機金鑰尚未被信任。請核對下方指紋，確認後繼續連線。",
+    "trustHostConfirm": "信任並繼續",
+    "trustHostDone": "主機金鑰已信任",
     "fields": {
       "name": "名稱",
       "hostAlias": "SSH Host",
       "hostAliasHint": "對應 ~/.ssh/config 中的 Host 項目。",
       "username": "使用者名稱",
       "port": "連接埠",
-      "identityFile": "私鑰"
+      "identityFile": "私鑰",
+      "password": "密碼",
+      "passwordHint": "選填；無私鑰時使用"
     }
   },
   "subscription": {

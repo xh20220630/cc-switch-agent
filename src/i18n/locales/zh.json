@@ -1518,6 +1518,12 @@
       "completed": "重建完成：导入 {{imported}} 条，错误 {{errors}}，疑似重复 {{suspected}}，暂缓文件 {{deferred}}",
       "failed": "Codex 用量重建失败：{{error}}"
     },
+    "sessionSync": {
+      "title": "同步会话用量",
+      "action": "同步会话",
+      "completed": "会话用量同步完成：导入 {{imported}} 条，错误 {{errors}}",
+      "failed": "会话用量同步失败：{{error}}"
+    },
     "totalRecords": "共 {{total}} 条记录",
     "goToPage": "跳转",
     "pageInputPlaceholder": "页码",
@@ -3027,13 +3033,26 @@
     },
     "deleteTitle": "删除服务器",
     "deleteMessage": "确定删除 {{name}}？",
+    "passwordTitle": "{{name}} 的连接密码",
+    "passwordDescription": "输入该服务器的 SSH 密码，仅本次连接使用。",
+    "savePasswordTitle": "是否保存密码？",
+    "savePasswordMessage": "登录成功。是否将密码保存到本机系统安全存储中，下次连接无需再次输入？",
+    "savePasswordConfirm": "保存密码",
+    "passwordSaved": "密码已保存",
+    "connectWithSavedPassword": "连接（已保存密码）",
+    "trustHostTitle": "是否信任该服务器？",
+    "trustHostMessage": "{{name}}（{{host}}）的主机密钥尚未被信任。请核对下方指纹，确认后继续连接。",
+    "trustHostConfirm": "信任并继续",
+    "trustHostDone": "主机密钥已信任",
     "fields": {
       "name": "名称",
       "hostAlias": "SSH Host",
       "hostAliasHint": "对应 ~/.ssh/config 中的 Host 条目。",
       "username": "用户名",
       "port": "端口",
-      "identityFile": "私钥"
+      "identityFile": "私钥",
+      "password": "密码",
+      "passwordHint": "可选；无私钥时使用"
     }
   },
   "subscription": {

@@ -1518,6 +1518,12 @@
       "completed": "Rebuild complete: {{imported}} imported, {{errors}} errors, {{suspected}} suspected duplicates, {{deferred}} deferred files",
       "failed": "Codex usage rebuild failed: {{error}}"
     },
+    "sessionSync": {
+      "title": "Sync session usage",
+      "action": "Sync sessions",
+      "completed": "Session usage sync complete: {{imported}} imported, {{errors}} errors",
+      "failed": "Session usage sync failed: {{error}}"
+    },
     "totalRecords": "{{total}} records total",
     "goToPage": "Go",
     "pageInputPlaceholder": "Page",
@@ -3027,13 +3033,26 @@
     },
     "deleteTitle": "Delete server",
     "deleteMessage": "Delete {{name}}?",
+    "passwordTitle": "Password for {{name}}",
+    "passwordDescription": "Enter the SSH password for this server. It is used for this connection only.",
+    "savePasswordTitle": "Save password?",
+    "savePasswordMessage": "Login succeeded. Save the password on this computer using the system secure storage, so you can connect without entering it next time?",
+    "savePasswordConfirm": "Save password",
+    "passwordSaved": "Password saved",
+    "connectWithSavedPassword": "Connect (saved password)",
+    "trustHostTitle": "Trust this server?",
+    "trustHostMessage": "The host key of {{name}} ({{host}}) is not trusted yet. Verify the fingerprints below, then continue.",
+    "trustHostConfirm": "Trust and continue",
+    "trustHostDone": "Host key trusted",
     "fields": {
       "name": "Name",
       "hostAlias": "SSH Host",
       "hostAliasHint": "Matches a Host entry in ~/.ssh/config.",
       "username": "Username",
       "port": "Port",
-      "identityFile": "Private key"
+      "identityFile": "Private key",
+      "password": "Password",
+      "passwordHint": "Optional; used when no private key"
     }
   },
   "subscription": {

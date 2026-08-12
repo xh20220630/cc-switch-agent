@@ -668,6 +668,10 @@ impl ClaudeAdapter {
     /// - `ANTHROPIC_API_KEY`    → `Anthropic` （发送 `x-api-key`）
     ///
     /// 优先级与 [`extract_key`] 一致；两者都缺时返回 `None` 由调用方决定 fallback。
+    ///
+    /// 特判：opencode zen 网关（`opencode.ai/zen/*`）只认 `x-api-key`，不认 Bearer；
+    /// 即使 provider 填的是 `ANTHROPIC_AUTH_TOKEN`，也强制走 x-api-key，
+    /// 否则直连/代理转发都会收到 `401 Missing API key`。
     fn infer_anthropic_auth_strategy(&self, provider: &Provider) -> Option<AuthStrategy> {
         let env = provider.settings_config.get("env")?;
 
@@ -679,6 +683,17 @@ impl ClaudeAdapter {
                 .is_some()
         };
 
+        let base_url = env
+            .get("ANTHROPIC_BASE_URL")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        let is_opencode_zen = base_url.contains("opencode.ai/zen");
+
+        if is_opencode_zen {
+            // opencode zen 网关只认 x-api-key：优先 ANTHROPIC_API_KEY 的值，
+            // 否则把 AUTH_TOKEN 的值同样以 x-api-key 发出。
+            return Some(AuthStrategy::Anthropic);
+        }
         if has_value("ANTHROPIC_AUTH_TOKEN") {
             return Some(AuthStrategy::ClaudeAuth);
         }

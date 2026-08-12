@@ -34,10 +34,42 @@ export const remoteApi = {
     return await localInvoke("remote_get_runtime_snapshot");
   },
 
-  async setActiveTarget(targetId?: string): Promise<RuntimeSnapshot> {
+  async setActiveTarget(
+    targetId?: string,
+    password?: string,
+  ): Promise<RuntimeSnapshot> {
     return await localInvoke("remote_set_active_target", {
       targetId: targetId ?? null,
+      password: password ?? null,
     });
+  },
+
+  async saveTargetPassword(
+    targetId: string,
+    password: string,
+  ): Promise<boolean> {
+    return await localInvoke("remote_save_target_password", {
+      targetId,
+      password,
+    });
+  },
+
+  async deleteTargetPassword(targetId: string): Promise<boolean> {
+    return await localInvoke("remote_delete_target_password", { targetId });
+  },
+
+  async hasTargetPassword(targetId: string): Promise<boolean> {
+    return await localInvoke("remote_has_target_password", { targetId });
+  },
+
+  async trustTargetHost(target: RemoteTargetConfig): Promise<string[]> {
+    // 类似 XShell 首次连接：把服务器公钥写入 known_hosts，返回密钥指纹。
+    return await localInvoke("remote_trust_target_host", { target });
+  },
+
+  async getHostKeyFingerprints(target: RemoteTargetConfig): Promise<string[]> {
+    // 仅读取服务器公钥指纹，用户确认前不写入 known_hosts。
+    return await localInvoke("remote_get_host_key_fingerprints", { target });
   },
 
   async onStatus(

@@ -985,6 +985,19 @@ impl ProxyService {
                     if let Ok(Some(mut provider)) =
                         self.db.get_provider_by_id(&provider_id, "claude")
                     {
+                        // 远程模式同步的 provider：其真实凭据来自远端 DB，本地 live
+                        // 的 token 可能是其它 provider 的配置，覆盖会导致代理转发 401。
+                        let remote_synced = provider
+                            .meta
+                            .as_ref()
+                            .and_then(|meta| meta.remote_synced)
+                            .unwrap_or(false);
+                        if remote_synced {
+                            log::info!(
+                                "跳过远程同步 provider `{provider_id}` 的 token 覆盖 (live token 来自本地)"
+                            );
+                            return Ok(());
+                        }
                         if let Some(env) = live_config.get("env").and_then(|v| v.as_object()) {
                             let token_pair = [
                                 "ANTHROPIC_AUTH_TOKEN",

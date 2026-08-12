@@ -2,8 +2,9 @@ use std::sync::{Arc, Mutex};
 
 use super::capabilities::{CommandCapabilityRegistry, RemoteCapabilityError};
 use super::client::RemoteClientError;
+use super::credentials::{CredentialError, RemoteCredentialStore};
 use super::models::{RemoteConnectionStatus, RemoteRuntimeSnapshot, RemoteTargetConfig};
-use super::ssh::{preflight, OpenSshSession, RemotePlatform, RemoteSshError};
+use super::ssh::{preflight, LocalForwardSpec, OpenSshSession, RemotePlatform, RemoteSshError};
 use super::target_store::{RemoteTargetStore, TargetStoreError};
 
 /// 跨 Core、Agent、SSH 客户端与 runtime generation 的公开错误契约。
@@ -59,12 +60,20 @@ type SharedRuntimeSession = Arc<dyn RuntimeCommandSession>;
 
 pub struct RemoteRuntimeState {
     store: RemoteTargetStore,
+    credentials: RemoteCredentialStore,
     snapshot: Mutex<RemoteRuntimeSnapshot>,
     session: Mutex<Option<SharedRuntimeSession>>,
 }
 
 impl RemoteRuntimeState {
     pub fn new(store: RemoteTargetStore) -> Result<Self, RemoteRuntimeError> {
+        Self::with_credentials(store, RemoteCredentialStore::default_path())
+    }
+
+    pub fn with_credentials(
+        store: RemoteTargetStore,
+        credentials: RemoteCredentialStore,
+    ) -> Result<Self, RemoteRuntimeError> {
         let document = store.load()?;
         let snapshot = match document.active_target_id {
             Some(target_id) => RemoteRuntimeSnapshot {
@@ -78,6 +87,7 @@ impl RemoteRuntimeState {
         };
         Ok(Self {
             store,
+            credentials,
             snapshot: Mutex::new(snapshot),
             session: Mutex::new(None),
         })
@@ -92,7 +102,11 @@ impl RemoteRuntimeState {
     }
 
     pub fn list_targets(&self) -> Result<Vec<RemoteTargetConfig>, RemoteRuntimeError> {
-        Ok(self.store.load()?.targets)
+        let mut targets = self.store.load()?.targets;
+        for target in &mut targets {
+            target.has_saved_password = self.credentials.has(&target.id);
+        }
+        Ok(targets)
     }
 
     pub fn upsert_target(&self, target: RemoteTargetConfig) -> Result<(), RemoteRuntimeError> {
@@ -112,6 +126,8 @@ impl RemoteRuntimeState {
     pub fn delete_target(&self, target_id: &str) -> Result<bool, RemoteRuntimeError> {
         let deleted = self.store.delete(target_id)?;
         if deleted {
+            // 目标删除时一并清理其保存的密码凭据，避免遗留过期凭据。
+            let _ = self.credentials.delete(target_id);
             let generation = {
                 let snapshot = self.lock_snapshot()?;
                 (snapshot.active_target_id.as_deref() == Some(target_id))
@@ -126,15 +142,45 @@ impl RemoteRuntimeState {
         Ok(deleted)
     }
 
+    pub fn save_target_password(&self, target_id: &str, password: &str) -> Result<(), RemoteRuntimeError> {
+        Ok(self.credentials.set(target_id, password)?)
+    }
+
+    pub fn delete_target_password(&self, target_id: &str) -> Result<bool, RemoteRuntimeError> {
+        Ok(self.credentials.delete(target_id)?)
+    }
+
+    pub fn has_target_password(&self, target_id: &str) -> Result<bool, RemoteRuntimeError> {
+        Ok(self.credentials.has(target_id))
+    }
+
     pub fn connect_target(
         &self,
         target_id: &str,
+        password: Option<String>,
     ) -> Result<RemoteRuntimeSnapshot, RemoteRuntimeError> {
-        let target = self
+        self.connect_target_with_forward(target_id, password, None)
+    }
+
+    /// 连接远程目标，可选择附带端口转发规格（把远端 CLI 的本地路由请求经
+    /// SSH 隧道送回桌面代理）。转发规格只影响本次连接，切换目标后自动失效。
+    pub fn connect_target_with_forward(
+        &self,
+        target_id: &str,
+        password: Option<String>,
+        forward: Option<LocalForwardSpec>,
+    ) -> Result<RemoteRuntimeSnapshot, RemoteRuntimeError> {
+        let mut target = self
             .list_targets()?
             .into_iter()
             .find(|target| target.id == target_id)
             .ok_or_else(|| RemoteRuntimeError::TargetNotFound(target_id.to_string()))?;
+        // 优先使用本次调用携带的密码，其次使用系统安全存储中已保存的密码；
+        // 两者都没有时保持 None，让 SSH 层按公钥/ssh-agent 认证。
+        target.password = match password {
+            Some(password) if !password.is_empty() => Some(password),
+            _ => self.credentials.get(target_id)?,
+        };
         let generation = {
             let mut snapshot = self.lock_snapshot()?;
             let generation = snapshot.generation + 1;
@@ -151,7 +197,7 @@ impl RemoteRuntimeState {
         *self.lock_session()? = None;
         self.store.set_active_target(Some(target_id.to_string()))?;
 
-        match OpenSshSession::connect(&target) {
+        match OpenSshSession::connect_with_forward(&target, forward) {
             Ok(session) => {
                 *self.lock_session()? = Some(Arc::new(session));
                 let mut snapshot = self.lock_snapshot()?;
@@ -258,6 +304,8 @@ impl RemoteRuntimeState {
 pub enum RemoteRuntimeError {
     #[error(transparent)]
     Store(#[from] TargetStoreError),
+    #[error(transparent)]
+    Credential(#[from] CredentialError),
     #[error("远程运行时状态锁损坏: {0}")]
     StatePoisoned(String),
     #[error("远程目标不存在: {0}")]
@@ -278,6 +326,8 @@ impl RemoteRuntimeError {
     pub fn code(&self) -> &str {
         match self {
             Self::Store(_) => "REMOTE_TARGET_STORE_ERROR",
+            Self::Credential(CredentialError::UnsupportedPlatform) => "CREDENTIAL_STORE_UNSUPPORTED",
+            Self::Credential(_) => "CREDENTIAL_STORE_ERROR",
             Self::StatePoisoned(_) => "REMOTE_STATE_ERROR",
             Self::TargetNotFound(_) => "REMOTE_TARGET_NOT_FOUND",
             Self::Offline => "REMOTE_OFFLINE",
@@ -379,5 +429,123 @@ mod generation_tests {
             .expect("等待旧请求")
             .expect_err("迟到响应必须被拒绝");
         assert_eq!(error.code(), "STALE_RUNTIME");
+    }
+}
+
+#[cfg(test)]
+mod password_e2e_tests {
+    use super::*;
+
+    /// 端到端密码认证集成测试：需要 CC_SWITCH_TEST_SSH_TARGET、CC_SWITCH_TEST_SSH_USER、
+    /// CC_SWITCH_TEST_SSH_PASSWORD 环境变量指向真实服务器。验证保存密码 → 连接时从
+    /// 凭据存储注入 → askpass 认证 → Agent 协议握手全链路，默认忽略避免 CI 依赖网络。
+    #[test]
+    #[ignore]
+    fn password_credentials_connect_end_to_end() {
+        let host = std::env::var("CC_SWITCH_TEST_SSH_TARGET").expect("设置测试服务器地址");
+        let username =
+            std::env::var("CC_SWITCH_TEST_SSH_USER").unwrap_or_else(|_| "root".to_string());
+        let password =
+            std::env::var("CC_SWITCH_TEST_SSH_PASSWORD").expect("设置测试服务器密码");
+
+        let temp = tempfile::tempdir().expect("创建 runtime fixture");
+        let dir = temp.keep();
+        let store = RemoteTargetStore::at(dir.join("remote-targets.json"));
+        let credentials = RemoteCredentialStore::at(dir.join("credentials.json"));
+        let runtime =
+            RemoteRuntimeState::with_credentials(store, credentials).expect("创建 runtime");
+        let target_id = "e2e-password-target";
+        runtime
+            .upsert_target(RemoteTargetConfig {
+                id: target_id.to_string(),
+                name: "e2e".to_string(),
+                host_alias: host.clone(),
+                username: Some(username),
+                port: Some(22),
+                identity_file: None,
+                password: None,
+                has_saved_password: false,
+            })
+            .expect("保存目标");
+
+        // 保存密码后不携带 password 连接，验证凭据存储自动注入路径。
+        runtime
+            .save_target_password(target_id, &password)
+            .expect("保存密码到凭据存储");
+        assert!(runtime.has_target_password(target_id).expect("检查密码存在"));
+        let snapshot = runtime.connect_target(target_id, None).expect("密码连接成功");
+        assert_eq!(snapshot.status, RemoteConnectionStatus::Online);
+
+        // 删除凭据后必须从存储中消失；后续连接（若有默认密钥）不再走密码路径。
+        runtime.delete_target_password(target_id).expect("删除密码");
+        assert!(!runtime.has_target_password(target_id).expect("检查密码已删除"));
+        assert_eq!(
+            runtime.list_targets().expect("读取目标列表")[0].has_saved_password,
+            false
+        );
+    }
+
+    /// 端到端主机密钥信任集成测试：需要 CC_SWITCH_TEST_SSH_TARGET 环境变量指向真实服务器。
+    /// 备份 known_hosts → 移除该主机条目 → 调用 trust_host_key 写入 → 验证 ssh-keygen -F
+    /// 能查到 → 最后恢复备份，默认忽略避免 CI 依赖网络或污染用户 known_hosts。
+    #[test]
+    #[ignore]
+    fn trust_host_key_end_to_end() {
+        let host = std::env::var("CC_SWITCH_TEST_SSH_TARGET").expect("设置测试服务器地址");
+        let known_hosts = crate::config::get_home_dir().join(".ssh").join("known_hosts");
+        let backup = known_hosts.with_extension("cc-switch-test-bak");
+        if known_hosts.exists() {
+            std::fs::copy(&known_hosts, &backup).expect("备份 known_hosts");
+        }
+        let mut restored = false;
+        let restore = |restored: &mut bool| {
+            if *restored {
+                return;
+            }
+            *restored = true;
+            if backup.exists() {
+                std::fs::copy(&backup, &known_hosts).expect("恢复 known_hosts");
+            } else if known_hosts.exists() {
+                std::fs::remove_file(&known_hosts).expect("清理 known_hosts");
+            }
+            let _ = std::fs::remove_file(&backup);
+        };
+
+        let target = RemoteTargetConfig {
+            id: "e2e-trust".to_string(),
+            name: "e2e".to_string(),
+            host_alias: host.clone(),
+            username: None,
+            port: Some(22),
+            identity_file: None,
+            password: None,
+            has_saved_password: false,
+        };
+
+        // 用 ssh-keygen -R 移除现有条目，模拟首次连接。
+        let status = std::process::Command::new("ssh-keygen")
+            .args(["-R", &host])
+            .status()
+            .expect("移除已有主机密钥");
+        assert!(status.success(), "ssh-keygen -R 执行失败");
+
+        let result = crate::remote::ssh::trust_host_key(&target);
+        if let Err(error) = &result {
+            restore(&mut restored);
+            panic!("trust_host_key 失败: {error}");
+        }
+        let fingerprints = result.expect("获取指纹");
+        assert!(!fingerprints.is_empty(), "应返回至少一个密钥指纹");
+
+        let check = std::process::Command::new("ssh-keygen")
+            .args(["-F", &host])
+            .output()
+            .expect("查询 known_hosts");
+        let check_out = String::from_utf8_lossy(&check.stdout);
+        assert!(
+            check_out.contains(&host),
+            "known_hosts 中应能找到 {host}，实际输出: {check_out}"
+        );
+        restore(&mut restored);
     }
 }

@@ -56,7 +56,9 @@ impl RemoteTargetStore {
     }
 
     pub fn upsert(&self, target: RemoteTargetConfig) -> Result<(), TargetStoreError> {
-        let target = target.normalize()?;
+        // 密码只作为本次连接的内存输入，永不写入 remote-targets.json；
+        // has_saved_password 是凭据存储派生的展示状态，也不落盘。
+        let target = strip_transient_fields(target.normalize()?);
         let mut document = self.load()?;
         if let Some(existing) = document
             .targets
@@ -121,6 +123,13 @@ fn temp_path_for(path: &Path) -> PathBuf {
             .map(|value| format!("{value}."))
             .unwrap_or_default()
     ))
+}
+
+/// 从持久化文档中剥离本次会话专用的瞬态字段。
+fn strip_transient_fields(mut target: RemoteTargetConfig) -> RemoteTargetConfig {
+    target.password = None;
+    target.has_saved_password = false;
+    target
 }
 
 #[derive(Debug, thiserror::Error)]

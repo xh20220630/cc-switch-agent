@@ -12,6 +12,17 @@ pub struct RemoteTargetConfig {
     pub port: Option<u16>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity_file: Option<String>,
+    /// 仅在本次连接/测试的内存中携带，永不写入 remote-targets.json
+    ///（upsert 落盘前由 target_store 剥离）。哈希靠系统安全存储单独保存。
+    #[serde(default, skip_serializing)]
+    pub password: Option<String>,
+    /// 派生状态：是否已在系统安全存储中保存密码；仅用于列表展示，落盘前由 store 剥离。
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub has_saved_password: bool,
+}
+
+const fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -63,7 +74,26 @@ impl RemoteTargetConfig {
         }
         self.username = normalize_optional_token("username", self.username)?;
         self.identity_file = normalize_optional_path(self.identity_file)?;
+        // 密码允许包含任意非控制字符，不做 trim（保留空格），也不允许控制字符。
+        self.password = normalize_optional_password(self.password)?;
         Ok(self)
+    }
+}
+
+fn normalize_optional_password(
+    value: Option<String>,
+) -> Result<Option<String>, RemoteTargetValidationError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let value = value.trim_matches('\u{0}');
+    if value.chars().any(char::is_control) {
+        return Err(RemoteTargetValidationError::InvalidField("password"));
+    }
+    if value.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(value.to_string()))
     }
 }
 

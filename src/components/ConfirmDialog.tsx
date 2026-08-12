@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   Dialog,
   DialogContent,
@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { AlertTriangle, Info } from "lucide-react";
+import { AlertTriangle, Info, LoaderCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 interface ConfirmDialogProps {
@@ -23,6 +23,10 @@ interface ConfirmDialogProps {
   /** 可选勾选项：提供 label 即显示，勾选状态经 onConfirm 参数回传 */
   checkboxLabel?: string;
   checkboxDefaultChecked?: boolean;
+  /** 附加内容（如密钥指纹展示） */
+  children?: ReactNode;
+  /** 确认按钮忙碌状态 */
+  busy?: boolean;
   onConfirm: (checkboxChecked: boolean) => void;
   onCancel: () => void;
 }
@@ -34,9 +38,12 @@ export function ConfirmDialog({
   confirmText,
   cancelText,
   variant = "destructive",
-  zIndex = "alert",
+  // 确认弹窗需要压过窗口顶部拖拽条（z-[70]）等固定元素，默认使用最高层级。
+  zIndex = "top",
   checkboxLabel,
   checkboxDefaultChecked = false,
+  children,
+  busy,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
@@ -84,17 +91,20 @@ export function ConfirmDialog({
             <span className="text-sm leading-relaxed">{checkboxLabel}</span>
           </label>
         ) : null}
+        {children}
         <DialogFooter className="flex gap-2 border-t-0 bg-transparent pt-2 sm:justify-end">
-          <Button variant="outline" onClick={onCancel}>
+          <Button variant="outline" onClick={onCancel} disabled={busy}>
             {cancelText || t("common.cancel")}
           </Button>
           <Button
             variant={variant === "info" ? "default" : "destructive"}
+            disabled={busy}
             onClick={() =>
               // 未渲染勾选框时不得回传 defaultChecked 残留值
               onConfirm(checkboxLabel ? checkboxChecked : false)
             }
           >
+            {busy && <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />}
             {confirmText || t("common.confirm")}
           </Button>
         </DialogFooter>

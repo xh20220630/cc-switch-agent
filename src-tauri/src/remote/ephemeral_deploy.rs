@@ -28,12 +28,21 @@ pub fn build_scp_args(
     remote_path: &str,
 ) -> Result<Vec<OsString>, RemoteTargetValidationError> {
     let target = target.clone().normalize()?;
-    let mut args = vec![
-        OsString::from("-o"),
-        OsString::from("BatchMode=yes"),
-        OsString::from("-o"),
-        OsString::from("StrictHostKeyChecking=yes"),
-    ];
+    let use_password = target.password.is_some();
+    let mut args = vec![OsString::from("-o")];
+    args.push(if use_password {
+        OsString::from("BatchMode=no")
+    } else {
+        OsString::from("BatchMode=yes")
+    });
+    args.push(OsString::from("-o"));
+    args.push(OsString::from("StrictHostKeyChecking=yes"));
+    if use_password {
+        args.push(OsString::from("-o"));
+        args.push(OsString::from("PreferredAuthentications=publickey,password"));
+        args.push(OsString::from("-o"));
+        args.push(OsString::from("NumberOfPasswordPrompts=1"));
+    }
     if let Some(port) = target.port {
         args.push(OsString::from("-P"));
         args.push(OsString::from(port.to_string()));

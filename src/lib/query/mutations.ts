@@ -293,8 +293,8 @@ export const useSwitchProviderMutation = (appId: AppId) => {
   const scope = useRuntimeQueryScope();
 
   return useMutation({
-    mutationFn: async (providerId: string): Promise<SwitchResult> => {
-      return await providersApi.switch(providerId, appId);
+    mutationFn: async (provider: Provider): Promise<SwitchResult> => {
+      return await providersApi.switch(provider.id, appId, provider);
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({

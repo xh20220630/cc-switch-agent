@@ -49,12 +49,27 @@ impl ProviderService {
         original_id: &str,
         provider: ProviderRecord,
     ) -> Result<bool, CoreError> {
+        Self::update_with_projection(state, app, original_id, provider, None)
+    }
+
+    /// 更新完整 Provider, 并允许投影使用桌面附带的改写快照（本地路由模式）。
+    /// 数据库始终落盘传入的原始 provider; 改写快照只用于 live 投影。
+    pub fn update_with_projection(
+        state: &HeadlessState,
+        app: &str,
+        original_id: &str,
+        provider: ProviderRecord,
+        projected: Option<ProviderRecord>,
+    ) -> Result<bool, CoreError> {
         let is_current = repository::current(state, app)? == original_id;
-        let projected_provider = provider.clone();
-        let updated = repository::update(state, app, original_id, provider)?;
+        let updated = repository::update(state, app, original_id, provider.clone())?;
         if is_current && should_project_implicitly(state, app) {
             let context = live_context(state);
-            live::project_provider(&context, app, &projected_provider)?;
+            let projection = match projected {
+                Some(projected) => live::project_provider(&context, app, &projected),
+                None => live::project_provider(&context, app, &provider),
+            };
+            projection?;
         }
         Ok(updated)
     }
@@ -66,11 +81,34 @@ impl ProviderService {
 
     /// 在数据库中原子切换当前项，并把选中配置投影到目标 HOME。
     pub fn switch(state: &HeadlessState, app: &str, id: &str) -> Result<SwitchResult, CoreError> {
+        Self::switch_with_projection_impl(state, app, id, None)
+    }
+
+    /// 切换当前项，但投影使用桌面附带的改写快照（本地路由模式：base_url 指向
+    /// 桌面代理、token 为占位符）。数据库只记录 current 指向，不落盘投影快照。
+    pub fn switch_with_projection(
+        state: &HeadlessState,
+        app: &str,
+        id: &str,
+        projected: ProviderRecord,
+    ) -> Result<SwitchResult, CoreError> {
+        Self::switch_with_projection_impl(state, app, id, Some(projected))
+    }
+
+    fn switch_with_projection_impl(
+        state: &HeadlessState,
+        app: &str,
+        id: &str,
+        projected: Option<ProviderRecord>,
+    ) -> Result<SwitchResult, CoreError> {
         let context = live_context(state);
         // 条件能力必须在事务前检查；Linux 不可写 Claude Desktop 时数据库保持原 current。
         live::ensure_projection_supported(&context, app)?;
         let provider = repository::switch(state, app, id)?;
-        live::project_provider(&context, app, &provider)
+        match projected {
+            Some(projected) => live::project_provider(&context, app, &projected),
+            None => live::project_provider(&context, app, &provider),
+        }
     }
 
     /// 原子更新同一应用的排序；任一未知 ID 都会回滚整批操作。

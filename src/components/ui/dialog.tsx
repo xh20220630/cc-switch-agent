@@ -17,9 +17,10 @@ const DialogOverlay = React.forwardRef<
   }
 >(({ className, zIndex = "base", ...props }, ref) => {
   const zIndexMap = {
-    base: "z-40",
-    nested: "z-50",
-    alert: "z-[60]",
+    // 必须高于顶部 header(z-50)与窗口拖拽条(z-[70]),否则弹窗顶部会被遮挡。
+    base: "z-[80]",
+    nested: "z-[90]",
+    alert: "z-[100]",
     top: "z-[110]",
   };
 
@@ -57,9 +58,10 @@ const DialogContent = React.forwardRef<
     ref,
   ) => {
     const zIndexMap = {
-      base: "z-40",
-      nested: "z-50",
-      alert: "z-[60]",
+      // 必须高于顶部 header(z-50)与窗口拖拽条(z-[70]),否则弹窗顶部会被遮挡。
+      base: "z-[80]",
+      nested: "z-[90]",
+      alert: "z-[100]",
       top: "z-[110]",
     };
 

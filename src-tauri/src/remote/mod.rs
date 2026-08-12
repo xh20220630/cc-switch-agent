@@ -5,6 +5,7 @@
 
 pub mod capabilities;
 pub mod client;
+pub mod credentials;
 pub mod embedded_agent;
 pub mod ephemeral_deploy;
 pub mod models;

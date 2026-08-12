@@ -38,6 +38,37 @@ export const extractErrorMessage = (error: unknown): string => {
 };
 
 /**
+ * 从错误对象中提取后端错误码（后端序列化为 `{"code":"...","message":"..."}` 的字符串）。
+ * 返回大写错误码，无法识别时返回空字符串。
+ */
+export const extractErrorCode = (error: unknown): string => {
+  let raw: unknown = error;
+  if (typeof error === "string") {
+    try {
+      const parsed = JSON.parse(error);
+      if (parsed && typeof parsed === "object") {
+        raw = parsed;
+      }
+    } catch {
+      return "";
+    }
+  }
+  if (raw && typeof raw === "object") {
+    const errObject = raw as Record<string, unknown>;
+    const payload = errObject.payload;
+    const candidateObj =
+      payload && typeof payload === "object"
+        ? (payload as Record<string, unknown>)
+        : errObject;
+    const code = candidateObj.code ?? errObject.code;
+    if (typeof code === "string" && code.trim()) {
+      return code.toUpperCase();
+    }
+  }
+  return "";
+};
+
+/**
  * 将已知的 MCP 相关后端错误（通常为中文硬编码）映射为 i18n 文案
  * 采用包含式匹配，尽量稳健地覆盖不同上下文的相似消息。
  * 若无法识别，返回空字符串以便调用方回退到原始 detail 或默认 i18n。

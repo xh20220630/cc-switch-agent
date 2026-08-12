@@ -1518,6 +1518,12 @@
       "completed": "再構築完了：{{imported}} 件インポート、{{errors}} 件エラー、重複候補 {{suspected}} 件、保留ファイル {{deferred}} 件",
       "failed": "Codex 使用量の再構築に失敗しました：{{error}}"
     },
+    "sessionSync": {
+      "title": "セッション使用量を同期",
+      "action": "セッションを同期",
+      "completed": "セッション使用量の同期完了：{{imported}} 件インポート、{{errors}} 件エラー",
+      "failed": "セッション使用量の同期に失敗しました：{{error}}"
+    },
     "totalRecords": "全 {{total}} 件",
     "goToPage": "移動",
     "pageInputPlaceholder": "ページ",
@@ -3027,13 +3033,26 @@
     },
     "deleteTitle": "サーバーを削除",
     "deleteMessage": "{{name}} を削除しますか？",
+    "passwordTitle": "{{name}} の接続パスワード",
+    "passwordDescription": "このサーバーの SSH パスワードを入力してください。この接続でのみ使用されます。",
+    "savePasswordTitle": "パスワードを保存しますか？",
+    "savePasswordMessage": "ログインに成功しました。システムのセキュリティストレージにパスワードを保存すると、次回から入力せずに接続できます。保存しますか？",
+    "savePasswordConfirm": "パスワードを保存",
+    "passwordSaved": "パスワードを保存しました",
+    "connectWithSavedPassword": "接続（保存済みパスワード）",
+    "trustHostTitle": "このサーバーを信頼しますか？",
+    "trustHostMessage": "{{name}}（{{host}}）のホストキーはまだ信頼されていません。下記のフィンガープリントを確認して、接続を続行してください。",
+    "trustHostConfirm": "信頼して続行",
+    "trustHostDone": "ホストキーを信頼しました",
     "fields": {
       "name": "名前",
       "hostAlias": "SSH Host",
       "hostAliasHint": "~/.ssh/config の Host エントリに対応します。",
       "username": "ユーザー名",
       "port": "ポート",
-      "identityFile": "秘密鍵"
+      "identityFile": "秘密鍵",
+      "password": "パスワード",
+      "passwordHint": "任意；秘密鍵がない場合に使用"
     }
   },
   "subscription": {

@@ -58,21 +58,30 @@ fn dispatch_provider(
         "provider.update" => {
             let args: UpdateArgs = parse_args(args)?;
             let original_id = args.original_id.unwrap_or_else(|| args.provider.id.clone());
-            to_value(ProviderService::update(
+            to_value(ProviderService::update_with_projection(
                 state,
                 &args.app,
                 &original_id,
                 args.provider,
+                args.projected,
             )?)
         }
         "provider.delete" => {
             let args: IdArgs = parse_args(args)?;
             ProviderService::delete(state, &args.app, &args.id)?;
             Ok(Value::Bool(true))
-        }
-        "provider.switch" => {
-            let args: IdArgs = parse_args(args)?;
-            to_value(ProviderService::switch(state, &args.app, &args.id)?)
+        }        "provider.switch" => {
+            let args: SwitchArgs = parse_args(args)?;
+            match args.provider {
+                // 桌面可附带改写后的投影快照(本地路由模式: base_url 指向桌面代理、
+                // token 为占位符), 此时不再从远端 DB 读取, 与"切换+投影"保持同一次语义。
+                Some(provider) => {
+                    to_value(ProviderService::switch_with_projection(
+                        state, &args.app, &args.id, provider,
+                    )?)
+                }
+                None => to_value(ProviderService::switch(state, &args.app, &args.id)?),
+            }
         }
         "provider.update_sort_order" => {
             let args: SortArgs = parse_args(args)?;
@@ -102,6 +111,19 @@ struct UpdateArgs {
     app: String,
     provider: ProviderRecord,
     original_id: Option<String>,
+    /// 可选的投影快照；携带时 update 只把该快照用于 live 投影，DB 落盘原始 provider。
+    #[serde(default)]
+    projected: Option<ProviderRecord>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SwitchArgs {
+    app: String,
+    id: String,
+    /// 可选的投影快照; 携带时 switch 直接投影该快照而非远端 DB 记录。
+    #[serde(default)]
+    provider: Option<ProviderRecord>,
 }
 
 #[derive(Debug, Deserialize)]

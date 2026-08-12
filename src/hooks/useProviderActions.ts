@@ -290,7 +290,7 @@ export function useProviderActions(
       }
 
       try {
-        const result = await switchProviderMutation.mutateAsync(provider.id);
+        const result = await switchProviderMutation.mutateAsync(provider);
         await syncClaudePlugin(provider);
 
         // Show backfill warning if present
