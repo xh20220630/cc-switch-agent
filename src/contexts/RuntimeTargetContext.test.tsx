@@ -91,7 +91,7 @@ describe("RuntimeTargetProvider query lifecycle", () => {
 
     await act(async () => cancelGate.resolve());
     await waitFor(() =>
-      expect(setActiveTargetMock).toHaveBeenCalledWith("server-a"),
+      expect(setActiveTargetMock).toHaveBeenCalledWith("server-a", undefined),
     );
     expect(
       screen.getByRole("button", { name: "connecting" }),

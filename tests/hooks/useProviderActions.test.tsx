@@ -195,7 +195,7 @@ describe("useProviderActions", () => {
       await result.current.switchProvider(provider);
     });
 
-    expect(switchProviderMutateAsync).toHaveBeenCalledWith(provider.id);
+    expect(switchProviderMutateAsync).toHaveBeenCalledWith(provider);
     expect(settingsApiGetMock).not.toHaveBeenCalled();
     expect(settingsApiApplyMock).not.toHaveBeenCalled();
     expect(toastSuccessMock).toHaveBeenCalledWith(
@@ -223,7 +223,7 @@ describe("useProviderActions", () => {
     });
 
     expect(toastWarningMock).toHaveBeenCalledTimes(1);
-    expect(switchProviderMutateAsync).toHaveBeenCalledWith(provider.id);
+    expect(switchProviderMutateAsync).toHaveBeenCalledWith(provider);
   });
 
   it("warns but still switches Codex full URL providers when proxy is not running", async () => {
@@ -245,7 +245,7 @@ describe("useProviderActions", () => {
     });
 
     expect(toastWarningMock).toHaveBeenCalledTimes(1);
-    expect(switchProviderMutateAsync).toHaveBeenCalledWith(provider.id);
+    expect(switchProviderMutateAsync).toHaveBeenCalledWith(provider);
   });
 
   it("warns when switching a Codex Anthropic-format provider without proxy", async () => {
@@ -267,7 +267,7 @@ describe("useProviderActions", () => {
     expect(toastWarningMock).toHaveBeenCalledWith(
       expect.stringContaining("Anthropic Messages"),
     );
-    expect(switchProviderMutateAsync).toHaveBeenCalledWith(provider.id);
+    expect(switchProviderMutateAsync).toHaveBeenCalledWith(provider);
   });
 
   it("warns for Grok providers that require the Responses router", async () => {
@@ -329,7 +329,7 @@ describe("useProviderActions", () => {
     expect(toastWarningMock).toHaveBeenCalledWith(
       expect.stringContaining("托管 OAuth"),
     );
-    expect(switchProviderMutateAsync).toHaveBeenCalledWith(provider.id);
+    expect(switchProviderMutateAsync).toHaveBeenCalledWith(provider);
   });
 
   it("does not warn for managed OAuth after the current Code app is taken over", async () => {
@@ -353,7 +353,7 @@ describe("useProviderActions", () => {
     });
 
     expect(toastWarningMock).not.toHaveBeenCalled();
-    expect(switchProviderMutateAsync).toHaveBeenCalledWith(provider.id);
+    expect(switchProviderMutateAsync).toHaveBeenCalledWith(provider);
   });
 
   it("uses proxy process readiness for Claude Desktop routing", async () => {
@@ -403,7 +403,7 @@ describe("useProviderActions", () => {
       await result.current.switchProvider(provider);
     });
 
-    expect(switchProviderMutateAsync).toHaveBeenCalledWith("codex-official");
+    expect(switchProviderMutateAsync).toHaveBeenCalledWith(provider);
     expect(toastErrorMock).not.toHaveBeenCalled();
   });
 
@@ -463,7 +463,7 @@ describe("useProviderActions", () => {
       await result.current.switchProvider(provider);
     });
 
-    expect(switchProviderMutateAsync).toHaveBeenCalledWith(provider.id);
+    expect(switchProviderMutateAsync).toHaveBeenCalledWith(provider);
     expect(settingsApiGetMock).toHaveBeenCalledTimes(1);
     expect(settingsApiApplyMock).toHaveBeenCalledWith({ official: true });
   });
@@ -726,7 +726,7 @@ describe("useProviderActions", () => {
     expect(result.current.isLoading).toBe(true);
   });
 
-  it("does not show backup details when setting OpenClaw default model", async () => {
+  it("sets the first OpenClaw model without inventing a fallback chain", async () => {
     openclawApiSetDefaultModelMock.mockResolvedValueOnce({
       backupPath: "/tmp/openclaw-backup.json5",
       warnings: [],
@@ -749,10 +749,41 @@ describe("useProviderActions", () => {
 
     expect(openclawApiSetDefaultModelMock).toHaveBeenCalledWith({
       primary: "provider-1/gpt-4.1",
-      fallbacks: ["provider-1/gpt-4.1-mini"],
     });
     expect(toastSuccessMock).toHaveBeenCalledTimes(1);
     expect(toastSuccessMock.mock.calls[0]?.[1]).toEqual({ closeButton: true });
+  });
+
+  it("sets the explicitly selected OpenClaw model and preserves existing fallbacks", async () => {
+    openclawApiGetDefaultModelMock.mockResolvedValueOnce({
+      primary: "other/old-primary",
+      fallbacks: ["provider-1/gpt-4.1-mini", "other/fallback"],
+      customPolicy: "preserve-me",
+    });
+    openclawApiSetDefaultModelMock.mockResolvedValueOnce({
+      warnings: [],
+    });
+
+    const { wrapper } = createWrapper();
+    const provider = createProvider({
+      settingsConfig: {
+        models: [{ id: "gpt-4.1" }, { id: "gpt-4.1-mini" }],
+      },
+    });
+
+    const { result } = renderHook(() => useProviderActions("openclaw"), {
+      wrapper,
+    });
+
+    await act(async () => {
+      await result.current.setAsDefaultModel(provider, "gpt-4.1-mini");
+    });
+
+    expect(openclawApiSetDefaultModelMock).toHaveBeenCalledWith({
+      primary: "provider-1/gpt-4.1-mini",
+      fallbacks: ["other/fallback"],
+      customPolicy: "preserve-me",
+    });
   });
 });
 it("clears loading flag when all mutations idle", () => {

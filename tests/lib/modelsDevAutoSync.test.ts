@@ -84,9 +84,10 @@ describe("syncModelsDevPricing", () => {
   });
 
   it("skips startup network access when pricing synced within the interval", async () => {
-    // 使用窗口中点而非 1ms 边界，避免全套测试调度耗时把 fixture 推到过期侧。
+    // Keep a meaningful margin inside the interval. A 1 ms margin races the
+    // async mocked config lookup and makes this test depend on machine load.
     const lastSyncAt =
-      Date.now() - Math.floor(MODELS_DEV_STARTUP_SYNC_INTERVAL_MS / 2);
+      Date.now() - MODELS_DEV_STARTUP_SYNC_INTERVAL_MS + 60_000;
     getModelsDevSyncConfig.mockResolvedValue({
       ...state,
       config: { ...state.config, lastSyncAt },

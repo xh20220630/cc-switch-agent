@@ -20,7 +20,15 @@ const {
 vi.mock("@/contexts/RuntimeTargetContext", () => ({
   useRuntimeTarget: () => ({
     snapshot: { status: "local", generation: 0 },
-    targets: [{ id: "prod", name: "Production", hostAlias: "prod-api" }],
+    targets: [
+      {
+        id: "prod",
+        name: "Production",
+        hostAlias: "prod-api",
+        identityFile: "~/.ssh/prod",
+        hasSavedPassword: false,
+      },
+    ],
     upsertTarget,
     deleteTarget,
     setActiveTarget,
@@ -138,6 +146,8 @@ describe("RemoteTargetsSettings", () => {
 
   it("connects and deletes a saved server through explicit actions", async () => {
     const user = userEvent.setup();
+    // 提供私钥让连接走直连路径(否则组件先收集密码,不会触发 setActiveTarget)。
+    setActiveTarget.mockResolvedValue(undefined);
     render(<RemoteTargetsSettings />);
 
     await user.click(

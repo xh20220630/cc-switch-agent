@@ -797,7 +797,7 @@ export function RemoteTargetsSettings() {
           defaultValue: "Trust and continue",
         })}
         cancelText={t("common.cancel", { defaultValue: "Cancel" })}
-        busy={trustCandidate?.busy}
+        pending={trustCandidate?.busy}
         onCancel={() => setTrustCandidate(undefined)}
         onConfirm={() => void handleConfirmTrust()}
       >

@@ -26,7 +26,7 @@ interface ConfirmDialogProps {
   /** 附加内容（如密钥指纹展示） */
   children?: ReactNode;
   /** 确认按钮忙碌状态 */
-  busy?: boolean;
+  pending?: boolean;
   onConfirm: (checkboxChecked: boolean) => void;
   onCancel: () => void;
 }
@@ -43,7 +43,7 @@ export function ConfirmDialog({
   checkboxLabel,
   checkboxDefaultChecked = false,
   children,
-  busy,
+  pending = false,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
@@ -66,7 +66,7 @@ export function ConfirmDialog({
     <Dialog
       open={isOpen}
       onOpenChange={(open) => {
-        if (!open) {
+        if (!open && !pending) {
           onCancel();
         }
       }}
@@ -85,6 +85,7 @@ export function ConfirmDialog({
           <label className="flex cursor-pointer select-none items-start gap-2 px-6 pt-3">
             <Checkbox
               checked={checkboxChecked}
+              disabled={pending}
               onCheckedChange={(value) => setCheckboxChecked(value === true)}
               className="mt-0.5"
             />
@@ -93,18 +94,18 @@ export function ConfirmDialog({
         ) : null}
         {children}
         <DialogFooter className="flex gap-2 border-t-0 bg-transparent pt-2 sm:justify-end">
-          <Button variant="outline" onClick={onCancel} disabled={busy}>
+          <Button variant="outline" onClick={onCancel} disabled={pending}>
             {cancelText || t("common.cancel")}
           </Button>
           <Button
             variant={variant === "info" ? "default" : "destructive"}
-            disabled={busy}
+            disabled={pending}
             onClick={() =>
               // 未渲染勾选框时不得回传 defaultChecked 残留值
               onConfirm(checkboxLabel ? checkboxChecked : false)
             }
           >
-            {busy && <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />}
+            {pending && <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />}
             {confirmText || t("common.confirm")}
           </Button>
         </DialogFooter>
