@@ -23,6 +23,8 @@ fn target() -> RemoteTargetConfig {
         username: Some("deploy".to_string()),
         port: Some(2222),
         identity_file: Some("C:\\Keys With Spaces\\agent key".to_string()),
+        password: None,
+        has_saved_password: false,
     }
 }
 

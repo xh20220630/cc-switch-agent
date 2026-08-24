@@ -21,6 +21,8 @@ fn clean_server_target() -> Option<RemoteTargetConfig> {
         username: Some(username),
         port: Some(port),
         identity_file: Some(identity_file),
+        password: None,
+        has_saved_password: false,
     })
 }
 

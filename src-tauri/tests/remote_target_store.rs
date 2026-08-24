@@ -13,6 +13,8 @@ fn target(id: &str, name: &str, host_alias: &str) -> RemoteTargetConfig {
         username: None,
         port: None,
         identity_file: None,
+        password: None,
+        has_saved_password: false,
     }
 }
 

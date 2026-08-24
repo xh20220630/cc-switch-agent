@@ -10,6 +10,8 @@ fn target() -> RemoteTargetConfig {
         username: None,
         port: None,
         identity_file: None,
+        password: None,
+        has_saved_password: false,
     }
 }
 
