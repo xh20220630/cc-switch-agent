@@ -18,6 +18,9 @@ pub struct ProviderRouter {
     db: Arc<Database>,
     /// 熔断器管理器 - key 格式: "app_type:provider_id"
     circuit_breakers: Arc<RwLock<HashMap<String, Arc<CircuitBreaker>>>>,
+    /// 远程隧道请求的 current provider (app_type -> provider_id)。
+    /// 由远程切换/编辑时同步, 与本地 current 完全隔离。
+    remote_current: Arc<RwLock<HashMap<String, String>>>,
 }
 
 impl ProviderRouter {
@@ -26,7 +29,22 @@ impl ProviderRouter {
         Self {
             db,
             circuit_breakers: Arc::new(RwLock::new(HashMap::new())),
+            remote_current: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    /// 更新远程隧道请求的 current provider；由远程切换/编辑时调用。
+    pub async fn set_remote_current(&self, app_type: &str, provider_id: String) {
+        self.remote_current
+            .write()
+            .await
+            .insert(app_type.to_string(), provider_id.clone());
+        log::info!("[proxy] 远程路由 current[{app_type}] = {provider_id}");
+    }
+
+    /// 读取远程隧道请求的 current provider。
+    pub async fn remote_current_id(&self, app_type: &str) -> Option<String> {
+        self.remote_current.read().await.get(app_type).cloned()
     }
 
     /// 选择可用的供应商（支持故障转移）
@@ -34,7 +52,14 @@ impl ProviderRouter {
     /// 返回按优先级排序的可用供应商列表：
     /// - 故障转移关闭时：仅返回当前供应商
     /// - 故障转移开启时：仅使用故障转移队列，按队列顺序依次尝试（P1 → P2 → ...）
-    pub async fn select_providers(&self, app_type: &str) -> Result<Vec<Provider>, AppError> {
+    ///
+    /// `is_remote`: 远程隧道请求(经 SSH 转发, base_url 带 /remote 前缀)时,
+    /// 按"远程 current"选择 provider, 与本地请求(按本地 current)隔离。
+    pub async fn select_providers(
+        &self,
+        app_type: &str,
+        is_remote: bool,
+    ) -> Result<Vec<Provider>, AppError> {
         let mut result = Vec::new();
         let mut total_providers = 0usize;
         let mut circuit_open_count = 0usize;
@@ -78,19 +103,37 @@ impl ProviderRouter {
             }
         } else {
             // 故障转移关闭：仅使用当前供应商，跳过熔断器检查
-            let current_id = AppType::from_str(app_type)
-                .ok()
-                .and_then(|app_enum| {
-                    crate::settings::get_effective_current_provider(&self.db, &app_enum)
-                        .ok()
-                        .flatten()
-                })
-                .or_else(|| self.db.get_current_provider(app_type).ok().flatten());
+            let current_id = if is_remote {
+                // 远程隧道请求：按远程同步的 current 选择，与本地 current 隔离。
+                match self.remote_current_id(app_type).await {
+                    Some(id) => Some(id),
+                    None => {
+                        log::warn!("[{app_type}] 远程路由未设置 current，回退本地 current");
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+            let current_id = current_id.or_else(|| {
+                AppType::from_str(app_type)
+                    .ok()
+                    .and_then(|app_enum| {
+                        crate::settings::get_effective_current_provider(&self.db, &app_enum)
+                            .ok()
+                            .flatten()
+                    })
+                    .or_else(|| self.db.get_current_provider(app_type).ok().flatten())
+            });
 
             if let Some(current_id) = current_id {
                 if let Some(current) = self.db.get_provider_by_id(&current_id, app_type)? {
                     total_providers = 1;
                     result.push(current);
+                } else if is_remote {
+                    log::warn!(
+                        "[{app_type}] 远程 current provider `{current_id}` 不在桌面 DB，回退本地 current"
+                    );
                 }
             }
         }
@@ -354,7 +397,7 @@ mod tests {
         db.add_to_failover_queue("claude", "b").unwrap();
 
         let router = ProviderRouter::new(db.clone());
-        let providers = router.select_providers("claude").await.unwrap();
+        let providers = router.select_providers("claude", false).await.unwrap();
 
         assert_eq!(providers.len(), 1);
         assert_eq!(providers[0].id, "a");
@@ -387,7 +430,7 @@ mod tests {
         db.update_proxy_config_for_app(config).await.unwrap();
 
         let router = ProviderRouter::new(db.clone());
-        let providers = router.select_providers("claude").await.unwrap();
+        let providers = router.select_providers("claude", false).await.unwrap();
 
         assert_eq!(providers.len(), 2);
         // 故障转移开启时：仅按队列顺序选择（忽略当前供应商）
@@ -419,7 +462,7 @@ mod tests {
         db.update_proxy_config_for_app(config).await.unwrap();
 
         let router = ProviderRouter::new(db.clone());
-        let providers = router.select_providers("claude").await.unwrap();
+        let providers = router.select_providers("claude", false).await.unwrap();
 
         assert_eq!(providers.len(), 1);
         assert_eq!(providers[0].id, "b");
@@ -462,7 +505,7 @@ mod tests {
             .await
             .unwrap();
 
-        let providers = router.select_providers("claude").await.unwrap();
+        let providers = router.select_providers("claude", false).await.unwrap();
         assert_eq!(providers.len(), 2);
 
         assert!(router.allow_provider_request("b", "claude").await.allowed);

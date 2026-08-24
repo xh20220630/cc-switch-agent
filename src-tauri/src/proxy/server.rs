@@ -288,6 +288,15 @@ impl ProxyServer {
         );
     }
 
+    /// 更新远程隧道请求的 current provider（经 SSH 转发, base_url 带 /remote 前缀）。
+    /// 与本地 current 完全隔离, 由远程切换/编辑时同步。
+    pub async fn set_remote_current(&self, app_type: &str, provider_id: &str) {
+        self.state
+            .provider_router
+            .set_remote_current(app_type, provider_id.to_string())
+            .await;
+    }
+
     fn build_router(&self) -> Router {
         Router::new()
             // 健康检查
@@ -296,6 +305,29 @@ impl ProxyServer {
             // Claude API (支持带前缀和不带前缀两种格式)
             .route("/v1/messages", post(handlers::handle_messages))
             .route("/claude/v1/messages", post(handlers::handle_messages))
+            // 远程隧道请求(经 SSH -R 转发, base_url 带 /remote 前缀)。
+            // 与本地请求(无前缀)共享 handler, 由 handler 按路径前缀区分来源,
+            // 分别按"远程 current"与"本地 current"选择 provider 转发。
+            .route(
+                "/remote/v1/messages",
+                post(handlers::handle_remote_messages),
+            )
+            .route(
+                "/remote/chat/completions",
+                post(handlers::handle_remote_chat_completions),
+            )
+            .route(
+                "/remote/v1/chat/completions",
+                post(handlers::handle_remote_chat_completions),
+            )
+            .route(
+                "/remote/responses",
+                post(handlers::handle_remote_responses),
+            )
+            .route(
+                "/remote/v1/responses",
+                post(handlers::handle_remote_responses),
+            )
             // Claude Desktop 3P 本地 gateway（独立 provider namespace）
             .route(
                 "/claude-desktop/v1/models",

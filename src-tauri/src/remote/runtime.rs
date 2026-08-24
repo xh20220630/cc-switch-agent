@@ -225,7 +225,9 @@ impl RemoteRuntimeState {
     }
 
     pub fn use_local(&self) -> Result<RemoteRuntimeSnapshot, RemoteRuntimeError> {
-        *self.lock_session()? = None;
+        // 保留已连 SSH 会话与其 -R 隧道：远程 CLI 的 live base_url 仍指向
+        // 127.0.0.1:{port}/remote，切回本机不能杀掉这条链路，否则远程 CLI
+        // 会因隧道消失而无法使用。仅在连接到其他远程目标(connect_* 前)时销毁。
         self.store.set_active_target(None)?;
         let mut snapshot = self.lock_snapshot()?;
         *snapshot = RemoteRuntimeSnapshot::local(snapshot.generation + 1);

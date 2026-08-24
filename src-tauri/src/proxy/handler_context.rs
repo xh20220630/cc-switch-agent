@@ -46,6 +46,9 @@ pub struct RequestContext {
     /// 这里使用本地 settings 的设备级 current provider。
     /// 代理模式下如果实际使用的 provider 与此不一致，会触发切换以确保 UI 始终准确。
     pub current_provider_id: String,
+    /// 是否为远程隧道请求(经 SSH 转发, base_url 带 /remote 前缀)。
+    /// 远程请求按"远程 current"选择 provider, 与本地 current 隔离。
+    pub is_remote: bool,
     /// 请求中的模型名称
     pub request_model: String,
     /// 实际发往上游的模型名（路由接管/模型映射后的真值，forward 成功后回填）。
@@ -92,6 +95,7 @@ impl RequestContext {
         app_type: AppType,
         tag: &'static str,
         app_type_str: &'static str,
+        is_remote: bool,
     ) -> Result<Self, ProxyError> {
         let start_time = Instant::now();
 
@@ -133,7 +137,7 @@ impl RequestContext {
         // 注意：只在这里调用一次，结果传递给 forwarder，避免重复消耗 HalfOpen 名额
         let providers = state
             .provider_router
-            .select_providers(app_type_str)
+            .select_providers(app_type_str, is_remote)
             .await
             .map_err(|e| match e {
                 crate::error::AppError::AllProvidersCircuitOpen => {
@@ -163,6 +167,7 @@ impl RequestContext {
             provider,
             providers,
             current_provider_id,
+            is_remote,
             request_model,
             outbound_model: None,
             tag,

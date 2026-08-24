@@ -2,6 +2,10 @@
 //!
 //! 提供本地HTTP代理服务，支持多Provider故障转移和请求透传
 
+/// 远程隧道请求的路径前缀：远程投影的 base_url 带此前缀, 代理据此区分
+/// 远程(经 SSH 隧道)与本地请求, 分别按各自的 current provider 转发。
+pub(crate) const REMOTE_ROUTE_PREFIX: &str = "/remote";
+
 pub mod body_filter;
 pub mod cache_injector;
 pub mod circuit_breaker;

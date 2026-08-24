@@ -9,6 +9,8 @@ use crate::remote::ssh::{host_key_fingerprints, trust_host_key, LocalForwardSpec
 use crate::remote::ssh_config::{discover_current_user_ssh_targets, DiscoveredSshTarget};
 use crate::store::AppState;
 
+use crate::proxy::REMOTE_ROUTE_PREFIX;
+
 #[tauri::command]
 pub fn remote_discover_ssh_targets() -> Result<Vec<DiscoveredSshTarget>, String> {
     // 发现过程只读取本机用户配置，不依赖当前远程运行时，也不会发起网络连接。
@@ -227,7 +229,8 @@ pub async fn remote_invoke(
     result
 }
 
-/// 把远程切换的 provider 注册进桌面 DB 并设为当前，供本地代理转发。
+/// 把远程切换的 provider 注册进桌面 DB 并设为"远程 current"，供本地代理转发。
+/// 与本地 current 完全隔离：不调用 set_current_provider，避免覆盖本地选择。
 async fn sync_provider_to_local_proxy(
     state: &tauri::State<'_, AppState>,
     sync: RemoteProviderSync,
@@ -248,19 +251,17 @@ async fn sync_provider_to_local_proxy(
         .db
         .save_provider(&sync.app_type, &provider)
         .map_err(|e| format!("保存 provider 到桌面 DB 失败: {e}"))?;
+    // 仅更新"远程 current"(代理按 /remote 前缀请求用它)，不触碰本地 current。
     state
-        .db
-        .set_current_provider(&sync.app_type, &provider.id)
-        .map_err(|e| format!("设置桌面 current provider 失败: {e}"))?;
-    crate::settings::set_current_provider(&sync.app_type_enum, Some(&provider.id))
-        .map_err(|e| e.to_string())?;
+        .proxy_service
+        .set_remote_current(&sync.app_type, &provider.id)
+        .await;
     Ok(())
 }
 
 /// 远程切换成功后需要同步到桌面代理的 provider 信息。
 struct RemoteProviderSync {
     app_type: String,
-    app_type_enum: crate::AppType,
     provider: crate::provider::Provider,
 }
 
@@ -359,7 +360,12 @@ async fn maybe_rewrite_provider_switch_for_remote_proxy(
     };
     // 与桌面代理接管语义一致：base_url 指向本地代理，token 替换为占位符，
     // 代理侧从 DB 读取真实凭据并按 provider 的 apiKeyField 选择 x-api-key。
-    let proxy_base_url = format!("http://127.0.0.1:{}", status.port);
+    // `/remote` 路径前缀标记远程来源：桌面代理据此按"远程 current"转发，
+    // 与本地请求(无前缀,按本地 current)隔离。
+    let proxy_base_url = format!(
+        "http://127.0.0.1:{}{}",
+        status.port, REMOTE_ROUTE_PREFIX
+    );
     env.insert(
         "ANTHROPIC_BASE_URL".to_string(),
         Value::String(proxy_base_url.clone()),
@@ -392,7 +398,6 @@ async fn maybe_rewrite_provider_switch_for_remote_proxy(
             match serde_json::from_value::<crate::provider::Provider>(provider_value) {
                 Ok(provider) => Some(RemoteProviderSync {
                     app_type: app_type.as_str().to_string(),
-                    app_type_enum: app_type,
                     provider,
                 }),
                 Err(error) => {

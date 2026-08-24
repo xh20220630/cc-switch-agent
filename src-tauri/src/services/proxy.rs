@@ -3078,6 +3078,18 @@ impl ProxyService {
         }
     }
 
+    /// 更新远程隧道请求的 current provider（经 SSH 转发, base_url 带 /remote 前缀）。
+    /// 与本地 current 完全隔离；代理未运行时仅记日志。
+    pub async fn set_remote_current(&self, app_type: &str, provider_id: &str) {
+        if let Some(server) = self.server.read().await.as_ref() {
+            server.set_remote_current(app_type, provider_id).await;
+        } else {
+            log::warn!(
+                "[proxy] 代理未运行，远程路由 current[{app_type}] = {provider_id} 未生效"
+            );
+        }
+    }
+
     /// 获取代理配置
     pub async fn get_config(&self) -> Result<ProxyConfig, String> {
         self.db

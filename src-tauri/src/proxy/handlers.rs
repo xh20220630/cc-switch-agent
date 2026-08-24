@@ -40,7 +40,7 @@ use super::{
     sse::{strip_sse_field, take_sse_block},
     types::*,
     usage::parser::TokenUsage,
-    ProxyError,
+    ProxyError, REMOTE_ROUTE_PREFIX,
 };
 use crate::app_config::AppType;
 use crate::database::PRICING_SOURCE_REQUEST;
@@ -123,7 +123,16 @@ pub async fn handle_messages(
     State(state): State<ProxyState>,
     request: axum::extract::Request,
 ) -> Result<axum::response::Response, ProxyError> {
-    handle_messages_for_app(state, request, AppType::Claude, "Claude", "claude", None).await
+    handle_messages_for_app(state, request, AppType::Claude, "Claude", "claude", None, false).await
+}
+
+/// 远程隧道请求(经 SSH -R 转发)的 Claude Messages 入口。
+/// 与本地共享 handler, 但按"远程 current"选择 provider。
+pub async fn handle_remote_messages(
+    State(state): State<ProxyState>,
+    request: axum::extract::Request,
+) -> Result<axum::response::Response, ProxyError> {
+    handle_messages_for_app(state, request, AppType::Claude, "Claude", "claude", None, true).await
 }
 
 pub async fn handle_claude_desktop_messages(
@@ -138,6 +147,7 @@ pub async fn handle_claude_desktop_messages(
         "Claude Desktop",
         "claude-desktop",
         Some("/claude-desktop"),
+        false,
     )
     .await
 }
@@ -149,7 +159,7 @@ pub async fn handle_claude_desktop_models(
     validate_claude_desktop_gateway_auth(&state, &headers)?;
     let providers = state
         .provider_router
-        .select_providers("claude-desktop")
+        .select_providers("claude-desktop", false)
         .await
         .map_err(|e| ProxyError::DatabaseError(e.to_string()))?;
     let provider = providers.first().ok_or(ProxyError::NoAvailableProvider)?;
@@ -165,6 +175,7 @@ async fn handle_messages_for_app(
     tag: &'static str,
     app_type_str: &'static str,
     strip_prefix: Option<&'static str>,
+    is_remote: bool,
 ) -> Result<axum::response::Response, ProxyError> {
     let (parts, body) = request.into_parts();
     let method = parts.method.clone();
@@ -179,16 +190,32 @@ async fn handle_messages_for_app(
     let body: Value = serde_json::from_slice(&body_bytes)
         .map_err(|e| ProxyError::Internal(format!("Failed to parse request body: {e}")))?;
 
-    let mut ctx =
-        RequestContext::new(&state, &body, &headers, app_type.clone(), tag, app_type_str).await?;
+    let mut ctx = RequestContext::new(
+        &state,
+        &body,
+        &headers,
+        app_type.clone(),
+        tag,
+        app_type_str,
+        is_remote,
+    )
+    .await?;
 
     let raw_endpoint = uri
         .path_and_query()
         .map(|path_and_query| path_and_query.as_str())
         .unwrap_or(uri.path());
+    // 远程隧道请求路径带 /remote 前缀, 转发前剥离, 避免上游 404。
+    let endpoint = if is_remote {
+        raw_endpoint
+            .strip_prefix(REMOTE_ROUTE_PREFIX)
+            .unwrap_or(raw_endpoint)
+    } else {
+        raw_endpoint
+    };
     let endpoint = strip_prefix
-        .and_then(|prefix| raw_endpoint.strip_prefix(prefix))
-        .unwrap_or(raw_endpoint);
+        .and_then(|prefix| endpoint.strip_prefix(prefix))
+        .unwrap_or(endpoint);
 
     let is_stream = body
         .get("stream")
@@ -704,6 +731,22 @@ pub async fn handle_chat_completions(
     State(state): State<ProxyState>,
     request: axum::extract::Request,
 ) -> Result<axum::response::Response, ProxyError> {
+    handle_chat_completions_inner(state, request, false).await
+}
+
+/// 远程隧道请求(经 SSH -R 转发)的 Chat Completions 入口。
+pub async fn handle_remote_chat_completions(
+    State(state): State<ProxyState>,
+    request: axum::extract::Request,
+) -> Result<axum::response::Response, ProxyError> {
+    handle_chat_completions_inner(state, request, true).await
+}
+
+async fn handle_chat_completions_inner(
+    state: ProxyState,
+    request: axum::extract::Request,
+    is_remote: bool,
+) -> Result<axum::response::Response, ProxyError> {
     let (parts, req_body) = request.into_parts();
     let method = parts.method.clone();
     let uri = parts.uri;
@@ -718,9 +761,27 @@ pub async fn handle_chat_completions(
     let body: Value = serde_json::from_slice(&body_bytes)
         .map_err(|e| ProxyError::Internal(format!("Failed to parse request body: {e}")))?;
 
-    let mut ctx =
-        RequestContext::new(&state, &body, &headers, AppType::Codex, "Codex", "codex").await?;
-    let endpoint = endpoint_with_query(&uri, "/chat/completions");
+    let mut ctx = RequestContext::new(
+        &state,
+        &body,
+        &headers,
+        AppType::Codex,
+        "Codex",
+        "codex",
+        is_remote,
+    )
+    .await?;
+    // 远程隧道请求路径带 /remote 前缀, 转发前剥离, 避免上游 404。
+    let endpoint = if is_remote {
+        uri.path_and_query()
+            .map(|pq| pq.as_str())
+            .unwrap_or(uri.path())
+            .strip_prefix(REMOTE_ROUTE_PREFIX)
+            .map(str::to_string)
+            .unwrap_or_else(|| "/chat/completions".to_string())
+    } else {
+        endpoint_with_query(&uri, "/chat/completions")
+    };
 
     let is_stream = body
         .get("stream")
@@ -770,7 +831,15 @@ pub async fn handle_responses(
     State(state): State<ProxyState>,
     request: axum::extract::Request,
 ) -> Result<axum::response::Response, ProxyError> {
-    handle_responses_for_app(state, request, AppType::Codex, "Codex", "codex").await
+    handle_responses_for_app(state, request, AppType::Codex, "Codex", "codex", false).await
+}
+
+/// 远程隧道请求(经 SSH -R 转发)的 Responses 入口。
+pub async fn handle_remote_responses(
+    State(state): State<ProxyState>,
+    request: axum::extract::Request,
+) -> Result<axum::response::Response, ProxyError> {
+    handle_responses_for_app(state, request, AppType::Codex, "Codex", "codex", true).await
 }
 
 pub async fn handle_grokbuild_responses(
@@ -783,6 +852,7 @@ pub async fn handle_grokbuild_responses(
         AppType::GrokBuild,
         "Grok Build",
         "grokbuild",
+        false,
     )
     .await
 }
@@ -793,6 +863,7 @@ async fn handle_responses_for_app(
     app_type: AppType,
     tag: &'static str,
     app_type_str: &'static str,
+    is_remote: bool,
 ) -> Result<axum::response::Response, ProxyError> {
     let (parts, req_body) = request.into_parts();
     let method = parts.method.clone();
@@ -808,9 +879,27 @@ async fn handle_responses_for_app(
     let body: Value = serde_json::from_slice(&body_bytes)
         .map_err(|e| ProxyError::Internal(format!("Failed to parse request body: {e}")))?;
 
-    let mut ctx =
-        RequestContext::new(&state, &body, &headers, app_type.clone(), tag, app_type_str).await?;
-    let endpoint = endpoint_with_query(&uri, "/responses");
+    let mut ctx = RequestContext::new(
+        &state,
+        &body,
+        &headers,
+        app_type.clone(),
+        tag,
+        app_type_str,
+        is_remote,
+    )
+    .await?;
+    // 远程隧道请求路径带 /remote 前缀, 转发前剥离, 避免上游 404。
+    let endpoint = if is_remote {
+        uri.path_and_query()
+            .map(|pq| pq.as_str())
+            .unwrap_or(uri.path())
+            .strip_prefix(REMOTE_ROUTE_PREFIX)
+            .map(str::to_string)
+            .unwrap_or_else(|| "/responses".to_string())
+    } else {
+        endpoint_with_query(&uri, "/responses")
+    };
 
     let is_stream = body
         .get("stream")
@@ -907,7 +996,7 @@ pub async fn handle_responses_compact(
     State(state): State<ProxyState>,
     request: axum::extract::Request,
 ) -> Result<axum::response::Response, ProxyError> {
-    handle_responses_compact_for_app(state, request, AppType::Codex, "Codex", "codex").await
+    handle_responses_compact_for_app(state, request, AppType::Codex, "Codex", "codex", false).await
 }
 
 pub async fn handle_grokbuild_responses_compact(
@@ -920,6 +1009,7 @@ pub async fn handle_grokbuild_responses_compact(
         AppType::GrokBuild,
         "Grok Build",
         "grokbuild",
+        false,
     )
     .await
 }
@@ -930,6 +1020,7 @@ async fn handle_responses_compact_for_app(
     app_type: AppType,
     tag: &'static str,
     app_type_str: &'static str,
+    is_remote: bool,
 ) -> Result<axum::response::Response, ProxyError> {
     let (parts, req_body) = request.into_parts();
     let method = parts.method.clone();
@@ -945,9 +1036,27 @@ async fn handle_responses_compact_for_app(
     let body: Value = serde_json::from_slice(&body_bytes)
         .map_err(|e| ProxyError::Internal(format!("Failed to parse request body: {e}")))?;
 
-    let mut ctx =
-        RequestContext::new(&state, &body, &headers, app_type.clone(), tag, app_type_str).await?;
-    let endpoint = endpoint_with_query(&uri, "/responses/compact");
+    let mut ctx = RequestContext::new(
+        &state,
+        &body,
+        &headers,
+        app_type.clone(),
+        tag,
+        app_type_str,
+        is_remote,
+    )
+    .await?;
+    // 远程隧道请求路径带 /remote 前缀, 转发前剥离, 避免上游 404。
+    let endpoint = if is_remote {
+        uri.path_and_query()
+            .map(|pq| pq.as_str())
+            .unwrap_or(uri.path())
+            .strip_prefix(REMOTE_ROUTE_PREFIX)
+            .map(str::to_string)
+            .unwrap_or_else(|| "/responses/compact".to_string())
+    } else {
+        endpoint_with_query(&uri, "/responses/compact")
+    };
 
     let is_stream = body
         .get("stream")
@@ -1950,9 +2059,17 @@ pub async fn handle_gemini(
     };
 
     // Gemini 的模型名称在 URI 中
-    let mut ctx = RequestContext::new(&state, &body, &headers, AppType::Gemini, "Gemini", "gemini")
-        .await?
-        .with_model_from_uri(&uri);
+    let mut ctx = RequestContext::new(
+        &state,
+        &body,
+        &headers,
+        AppType::Gemini,
+        "Gemini",
+        "gemini",
+        false,
+    )
+    .await?
+    .with_model_from_uri(&uri);
 
     // 提取完整的路径和查询参数
     let endpoint = uri
