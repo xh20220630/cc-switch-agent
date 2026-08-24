@@ -323,10 +323,25 @@ jobs:
       - name: Run Windows-to-WSL2 filesystem contract
         shell: pwsh
         run: |
+          $testName = "config::tests::atomic_write_replaces_existing_wsl_unc_file"
+          # 先用原生 TEMP 完成编译并定位测试可执行文件；TEMP/TMP 一旦指向 WSL UNC，
+          # cargo 的任何链接步骤（mt.exe/manifest）都会失败（c1010070/LNK1327）。
+          $jsonOutput = cargo test --lib --manifest-path src-tauri/Cargo.toml --no-run --message-format=json
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+          $testExe = $jsonOutput | ForEach-Object {
+            try { $_ | ConvertFrom-Json } catch { $null }
+          } | Where-Object {
+            $_.reason -eq "compiler-artifact" -and $_.target.kind -contains "test" -and $_.executable
+          } | Select-Object -First 1 -ExpandProperty executable
+          if (-not $testExe) {
+            throw "Test executable was not produced for $testName"
+          }
+          # 切换 TEMP/TMP 到 WSL UNC 后直接运行已编译二进制，不再经过 cargo/link.exe。
           $env:TEMP = $env:CC_SWITCH_WSL_TEST_TEMP
           $env:TMP = $env:CC_SWITCH_WSL_TEST_TEMP
-          $testName = "config::tests::atomic_write_replaces_existing_wsl_unc_file"
-          $testList = cargo test --lib --manifest-path src-tauri/Cargo.toml -- --ignored --list
+          $testList = & $testExe --ignored --list
           if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
           }
@@ -334,7 +349,7 @@ jobs:
           if ($testList -notcontains $expected) {
             throw "Expected ignored test was not discovered: $testName"
           }
-          cargo test --lib --manifest-path src-tauri/Cargo.toml $testName -- --ignored --exact --nocapture
+          & $testExe --ignored --exact $testName --nocapture
           if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
           }
