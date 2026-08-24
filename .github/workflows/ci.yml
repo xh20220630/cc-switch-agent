@@ -333,7 +333,7 @@ jobs:
           $testExe = $jsonOutput | ForEach-Object {
             try { $_ | ConvertFrom-Json } catch { $null }
           } | Where-Object {
-            $_.reason -eq "compiler-artifact" -and $_.target.kind -contains "test" -and $_.executable
+            $_.reason -eq "compiler-artifact" -and $_.target.test -and $_.executable
           } | Select-Object -First 1 -ExpandProperty executable
           if (-not $testExe) {
             throw "Test executable was not produced for $testName"
