@@ -4,9 +4,6 @@ use crate::error::AppError;
 use crate::services::model_pricing::{ModelPricingInfo, ModelsDevSyncConfig, ModelsDevSyncState};
 use crate::services::usage_stats::*;
 use crate::store::AppState;
-use cc_switch_core::{
-    DataSourceSummary, HeadlessState, OperationCancellation, SessionSyncResult, UsageService,
-};
 use tauri::State;
 
 /// 获取使用量汇总
@@ -125,8 +122,8 @@ pub fn get_request_detail(
 /// 获取模型定价列表
 #[tauri::command]
 pub fn get_model_pricing(state: State<'_, AppState>) -> Result<Vec<ModelPricingInfo>, AppError> {
+    log::info!("获取模型定价列表");
     state.db.ensure_model_pricing_seeded()?;
-    // 读取前先合并本地覆盖文件，确保 models.dev 自动同步、用户删除墓碑和数据库视图一致。
     crate::services::model_pricing::sync_local_model_pricing(&state.db)?;
 
     let db = state.db.clone();
@@ -173,7 +170,7 @@ pub fn get_model_pricing(state: State<'_, AppState>) -> Result<Vec<ModelPricingI
     Ok(pricing)
 }
 
-/// 更新模型定价；写入与历史成本回填仍由桌面写侧服务维护。
+/// 更新模型定价
 #[tauri::command]
 pub fn update_model_pricing(
     state: State<'_, AppState>,
@@ -238,14 +235,12 @@ pub fn check_provider_limits(
     provider_id: String,
     app_type: String,
 ) -> Result<crate::services::usage_stats::ProviderLimitStatus, AppError> {
-    let conn = crate::database::lock_conn!(state.db.conn);
-    UsageService::limits_on_connection(&conn, &provider_id, &app_type).map_err(map_core_usage_error)
+    state.db.check_provider_limits(&provider_id, &app_type)
 }
 
 /// 删除模型定价
 #[tauri::command]
 pub fn delete_model_pricing(state: State<'_, AppState>, model_id: String) -> Result<(), AppError> {
-    // 删除必须经过写侧服务记录墓碑，避免后续 models.dev 同步把用户删除项重新写回。
     crate::services::model_pricing::delete_model_pricing(&state.db, &model_id)?;
     log::info!("已删除模型定价: {model_id}");
     Ok(())
@@ -253,33 +248,25 @@ pub fn delete_model_pricing(state: State<'_, AppState>, model_id: String) -> Res
 
 /// 手动触发会话日志同步
 #[tauri::command]
-pub async fn sync_session_usage(state: State<'_, AppState>) -> Result<SessionSyncResult, AppError> {
-    // 仍持有桌面进程级互斥锁，避免自动同步与手动同步同时扫描；实际文件和 SQLite
-    // 业务统一交给 Core，远端 Agent 因此得到相同的来源集合与写入语义。
-    let _db_lifetime = state.db.clone();
-    let _guard = crate::services::session_sync::session_sync_mutex()
+pub async fn sync_session_usage(
+    state: State<'_, AppState>,
+) -> Result<crate::services::session_usage::SessionSyncResult, AppError> {
+    let db = state.db.clone();
+    let _guard = crate::services::session_usage::session_sync_mutex()
         .lock()
         .await;
-    tauri::async_runtime::spawn_blocking(move || -> Result<SessionSyncResult, AppError> {
-        let core =
-            HeadlessState::open(crate::config::get_home_dir()).map_err(map_core_usage_error)?;
-        UsageService::sync_sessions(&core, &OperationCancellation::active())
-            .map_err(map_core_usage_error)
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::services::session_usage::sync_all_unlocked(&db)
     })
     .await
-    .map_err(|error| AppError::Message(format!("会话用量同步任务失败: {error}")))?
-    .inspect(|result| {
-        if result.imported > 0 {
-            crate::usage_events::notify_log_recorded();
-        }
-    })
+    .map_err(|error| AppError::Message(format!("会话用量同步任务失败: {error}")))
 }
 
 /// Codex reset 成功后，无论重导是否导入新行或返回错误，都必须通知前端刷新。
 /// 调用方应只在 reset 成功后调用，避免把未发生的数据变更误报为重建完成。
 fn finish_codex_rebuild(
-    result: Result<SessionSyncResult, AppError>,
-) -> Result<SessionSyncResult, AppError> {
+    result: Result<crate::services::session_usage::SessionSyncResult, AppError>,
+) -> Result<crate::services::session_usage::SessionSyncResult, AppError> {
     crate::usage_events::notify_log_recorded();
     result
 }
@@ -289,18 +276,15 @@ fn finish_codex_rebuild(
 #[tauri::command]
 pub async fn rebuild_codex_usage(
     state: State<'_, AppState>,
-) -> Result<SessionSyncResult, AppError> {
-    let _db_lifetime = state.db.clone();
-    let _guard = crate::services::session_sync::session_sync_mutex()
+) -> Result<crate::services::session_usage::SessionSyncResult, AppError> {
+    let db = state.db.clone();
+    let _guard = crate::services::session_usage::session_sync_mutex()
         .lock()
         .await;
-    tauri::async_runtime::spawn_blocking(move || -> Result<SessionSyncResult, AppError> {
-        // Core 内部固定执行 backup -> reset -> import，并在每个破坏性边界检查取消；
-        // 桌面层只负责异步调度和刷新事件，不能重新拆开该序列。
-        let core =
-            HeadlessState::open(crate::config::get_home_dir()).map_err(map_core_usage_error)?;
-        let result = UsageService::rebuild_codex(&core, &OperationCancellation::active())
-            .map_err(map_core_usage_error);
+    tauri::async_runtime::spawn_blocking(move || {
+        db.backup_database_file()?;
+        db.reset_codex_usage()?;
+        let result = crate::services::session_usage_codex::sync_codex_usage(&db);
         finish_codex_rebuild(result)
     })
     .await
@@ -311,9 +295,8 @@ pub async fn rebuild_codex_usage(
 #[tauri::command]
 pub fn get_usage_data_sources(
     state: State<'_, AppState>,
-) -> Result<Vec<DataSourceSummary>, AppError> {
-    let conn = crate::database::lock_conn!(state.db.conn);
-    UsageService::data_sources(&*conn).map_err(map_core_usage_error)
+) -> Result<Vec<crate::services::session_usage::DataSourceSummary>, AppError> {
+    crate::services::session_usage::get_data_source_breakdown(&state.db)
 }
 
 #[cfg(test)]
@@ -324,7 +307,10 @@ mod tests {
     fn codex_rebuild_notifies_when_reimport_is_empty() {
         crate::usage_events::take_test_notify_count();
 
-        let result = finish_codex_rebuild(Ok(SessionSyncResult::default())).expect("空重导应成功");
+        let result = finish_codex_rebuild(Ok(
+            crate::services::session_usage::SessionSyncResult::default(),
+        ))
+        .expect("空重导应成功");
 
         assert_eq!(result.imported, 0);
         assert_eq!(crate::usage_events::take_test_notify_count(), 1);

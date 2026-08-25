@@ -14,6 +14,7 @@ import type { Provider } from "@/types";
 import { providersApi, type AppId } from "@/lib/api";
 import { providerKeys } from "@/lib/query/queries";
 import { useRuntimeQueryScope } from "@/lib/runtime/queryScope";
+import { isProxyAppId } from "@/config/appConfig";
 
 export function useDragSort(providers: Record<string, Provider>, appId: AppId) {
   const queryClient = useQueryClient();
@@ -83,10 +84,12 @@ export function useDragSort(providers: Record<string, Provider>, appId: AppId) {
           queryKey: providerKeys.byApp(appId, scope),
         });
 
-        // 刷新故障转移队列（因为队列顺序依赖 sort_index）
-        await queryClient.invalidateQueries({
-          queryKey: ["failoverQueue", appId],
-        });
+        // Routing apps derive failover order from sort_index.
+        if (isProxyAppId(appId)) {
+          await queryClient.invalidateQueries({
+            queryKey: ["failoverQueue", appId],
+          });
+        }
 
         // 更新托盘菜单以反映新的排序（失败不影响主操作）
         try {

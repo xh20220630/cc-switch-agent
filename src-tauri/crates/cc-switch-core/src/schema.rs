@@ -5,7 +5,7 @@ use std::time::Duration;
 use rusqlite::Connection;
 
 /// 与桌面数据库 `src/database/mod.rs` 保持一致；Agent 不再维护独立版本号。
-pub const DESKTOP_SCHEMA_VERSION: i32 = 16;
+pub const DESKTOP_SCHEMA_VERSION: i32 = 17;
 
 const CANONICAL_REQUIRED_SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS providers (
@@ -252,6 +252,7 @@ pub fn migrate_supported_database(
                 13 => migrate_v13_to_v14(connection)?,
                 14 => migrate_v14_to_v15(connection)?,
                 15 => reset_codex_usage_on_connection(connection, codex_dir)?,
+                16 => migrate_v16_to_v17(connection)?,
                 _ => {
                     return Err(SchemaError::Incompatible {
                         detected: version,
@@ -519,6 +520,23 @@ pub fn reset_codex_usage_on_connection(
             )?;
         }
     }
+    Ok(())
+}
+
+/// v16 -> v17: preserve session request identities after detail rollup.
+/// 明细 prune 后 request_id → semantic_id 映射需要持久化账本，否则去重失效。
+fn migrate_v16_to_v17(connection: &Connection) -> Result<(), SchemaError> {
+    connection.execute_batch(
+        "CREATE TABLE IF NOT EXISTS session_usage_dedup (
+            data_source TEXT NOT NULL,
+            request_id TEXT NOT NULL,
+            semantic_id TEXT NOT NULL,
+            has_entry_id INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (data_source, request_id)
+         );
+         CREATE INDEX IF NOT EXISTS idx_session_usage_dedup_semantic
+         ON session_usage_dedup(data_source, semantic_id, has_entry_id);",
+    )?;
     Ok(())
 }
 

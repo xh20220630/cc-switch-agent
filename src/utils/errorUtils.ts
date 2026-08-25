@@ -37,6 +37,28 @@ export const extractErrorMessage = (error: unknown): string => {
   return "";
 };
 
+export const translatePiProviderMutationError = (
+  message: string,
+  t: (key: string, options?: Record<string, unknown>) => string,
+): string => {
+  if (!message) return "";
+
+  if (
+    message.includes("models.json changed") ||
+    message.includes("changed outside CC Switch") ||
+    message.includes("no longer present in models.json") ||
+    message.includes("another value now owns the key")
+  ) {
+    return t("pi.provider.writeConflict");
+  }
+
+  if (message.includes("Pi provider") && message.includes("already exists")) {
+    return t("pi.form.providerKeyDuplicate");
+  }
+
+  return "";
+};
+
 /**
  * 从错误对象中提取后端错误码（后端序列化为 `{"code":"...","message":"..."}` 的字符串）。
  * 返回大写错误码，无法识别时返回空字符串。
