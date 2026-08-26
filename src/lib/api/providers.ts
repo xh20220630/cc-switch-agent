@@ -218,6 +218,39 @@ export const providersApi = {
     return await appInvoke("get_hermes_live_provider_ids");
   },
 
+  // === 跨环境同步专用：强制指定目标环境，不跟随当前 Runtime 模式 ===
+  /** 强制从本机读取（不走远程转发） */
+  async listLocal(appId: AppId): Promise<Record<string, Provider>> {
+    return await localInvoke<Record<string, Provider>>("get_providers", {
+      app: appId,
+    });
+  },
+  /** 强制从远程读取（要求远程在线） */
+  async listRemote(appId: AppId): Promise<Record<string, Provider>> {
+    const { remoteApi } = await import("./remote");
+    return await remoteApi.invokeRemote<Record<string, Provider>>(
+      "provider.list",
+      { app: appId },
+    );
+  },
+  /** 强制写入本机 */
+  async addToLocal(provider: Provider, appId: AppId): Promise<boolean> {
+    return await localInvoke<boolean>("add_provider", {
+      provider,
+      app: appId,
+      addToLive: false,
+    });
+  },
+  /** 强制写入远程 */
+  async addToRemote(provider: Provider, appId: AppId): Promise<boolean> {
+    const { remoteApi } = await import("./remote");
+    return await remoteApi.invokeRemote<boolean>("provider.add", {
+      app: appId,
+      provider,
+      addToLive: false,
+    });
+  },
+
   /**
    * 从 OpenClaw live 配置导入供应商到数据库
    * OpenClaw 特有功能：由于累加模式，用户可能已在 openclaw.json 中配置供应商

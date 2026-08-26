@@ -27,6 +27,7 @@ import {
   LayoutDashboard,
   Loader2,
   RefreshCw,
+  ArrowLeftRight,
 } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { Provider, VisibleApps } from "@/types";
@@ -73,6 +74,7 @@ import { RuntimeTargetSwitcher } from "@/components/remote/RuntimeTargetSwitcher
 import { ProviderList } from "@/components/providers/ProviderList";
 import { AddProviderDialog } from "@/components/providers/AddProviderDialog";
 import { EditProviderDialog } from "@/components/providers/EditProviderDialog";
+import { ProviderSyncDialog } from "@/components/providers/ProviderSyncDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { SettingsPage } from "@/components/settings/SettingsPage";
 import { UpdateBadge } from "@/components/UpdateBadge";
@@ -191,6 +193,7 @@ function App() {
     useState<SkillsPageSource>("repos");
   const [settingsDefaultTab, setSettingsDefaultTab] = useState("general");
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const [isSyncOpen, setIsSyncOpen] = useState(false);
   const [isWindowMaximized, setIsWindowMaximized] = useState(false);
   const [mcpManagementBusy, setMcpManagementBusy] = useState(false);
   const [skillsManagementBusy, setSkillsManagementBusy] = useState(false);
@@ -1746,6 +1749,20 @@ function App() {
                     </div>
 
                     <Button
+                      onClick={() => setIsSyncOpen(true)}
+                      variant="ghost"
+                      size="icon"
+                      className="rounded-full hover:bg-black/5 dark:hover:bg-white/5"
+                      aria-label={t("provider.sync.title", {
+                        defaultValue: "同步提供商",
+                      })}
+                      title={t("provider.sync.title", {
+                        defaultValue: "同步提供商",
+                      })}
+                    >
+                      <ArrowLeftRight className="w-4 h-4" />
+                    </Button>
+                    <Button
                       onClick={() => setIsAddOpen(true)}
                       size="icon"
                       className={`ml-2 ${addActionButtonClass}`}
@@ -1774,6 +1791,12 @@ function App() {
         onOpenChange={setIsAddOpen}
         appId={activeApp}
         onSubmit={addProvider}
+      />
+
+      <ProviderSyncDialog
+        open={isSyncOpen}
+        onOpenChange={setIsSyncOpen}
+        appId={activeApp}
       />
 
       <EditProviderDialog
