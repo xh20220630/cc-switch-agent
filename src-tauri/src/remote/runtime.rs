@@ -481,9 +481,11 @@ mod password_e2e_tests {
         // 删除凭据后必须从存储中消失；后续连接（若有默认密钥）不再走密码路径。
         runtime.delete_target_password(target_id).expect("删除密码");
         assert!(!runtime.has_target_password(target_id).expect("检查密码已删除"));
-        assert_eq!(
-            runtime.list_targets().expect("读取目标列表")[0].has_saved_password,
-            false
+        assert!(
+            !runtime
+                .list_targets()
+                .expect("读取目标列表")[0]
+                .has_saved_password
         );
     }
 

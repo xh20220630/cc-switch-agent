@@ -104,6 +104,15 @@ CREATE TABLE IF NOT EXISTS session_log_sync (
     last_line_offset INTEGER NOT NULL DEFAULT 0,
     last_synced_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS session_usage_dedup (
+    data_source TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    semantic_id TEXT NOT NULL,
+    has_entry_id INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (data_source, request_id)
+);
+CREATE INDEX IF NOT EXISTS idx_session_usage_dedup_semantic
+ON session_usage_dedup(data_source, semantic_id, has_entry_id);
 "#;
 
 const REQUIRED_COLUMNS: &[(&str, &[&str])] = &[

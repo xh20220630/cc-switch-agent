@@ -1082,7 +1082,7 @@ pub async fn handle_alpha_search(
         .map_err(|e| ProxyError::InvalidRequest(format!("Failed to parse request body: {e}")))?;
 
     let mut ctx =
-        RequestContext::new(&state, &body, &headers, AppType::Codex, "Codex", "codex").await?;
+        RequestContext::new(&state, &body, &headers, AppType::Codex, "Codex", "codex", false).await?;
     let endpoint = endpoint_with_query(&uri, "/alpha/search");
 
     let forwarder = ctx.create_forwarder(&state);

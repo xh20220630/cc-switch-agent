@@ -537,14 +537,12 @@ mod tests {
         db.update_proxy_config_for_app(config).await.unwrap();
 
         let providers = ProviderRouter::new(db)
-            .select_providers("codex")
+            .select_providers("codex", false)
             .await
             .unwrap();
         assert_eq!(providers.len(), 1);
         assert_eq!(providers[0].id, official.id);
-    }
-
-    #[tokio::test]
+    }    #[tokio::test]
     #[serial]
     async fn stale_codex_official_queue_entries_are_not_retry_targets() {
         let _home = TempHome::new();
@@ -574,7 +572,7 @@ mod tests {
         db.update_proxy_config_for_app(config).await.unwrap();
 
         let providers = ProviderRouter::new(db)
-            .select_providers("codex")
+            .select_providers("codex", false)
             .await
             .unwrap();
         assert_eq!(

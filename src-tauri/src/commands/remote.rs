@@ -203,6 +203,18 @@ pub async fn remote_invoke(
     // 因此在此改写投影快照并随命令下发，远端 DB 的原始配置保持不变。
     let (args, remote_provider_sync) =
         maybe_rewrite_provider_switch_for_remote_proxy(&app_handle, &command, args).await;
+    // provider.delete 的定位参数在 args 被 move 进远程任务前提取。
+    let deleted_provider_ref = if command == "provider.delete" {
+        Some((
+            args.get("app").and_then(Value::as_str).map(str::to_string),
+            args.get("id")
+                .or_else(|| args.get("originalId"))
+                .and_then(Value::as_str)
+                .map(str::to_string),
+        ))
+    } else {
+        None
+    };
     let result = {
         let app_handle = app_handle.clone();
         tauri::async_runtime::spawn_blocking(move || {
@@ -223,6 +235,28 @@ pub async fn remote_invoke(
             match sync_provider_to_local_proxy(&state, sync).await {
                 Ok(()) => log::info!("[remote] 已同步远程 provider 到桌面代理路由"),
                 Err(error) => log::warn!("[remote] 同步远程 provider 到桌面代理失败: {error}"),
+            }
+        } else if let Some((Some(app), Some(id))) = deleted_provider_ref {
+            // 远程删除 provider 后，同步清理桌面 DB 的影子记录(remoteSynced)，
+            // 否则代理转发失去凭据来源且记录永久残留。
+            let state = app_handle.state::<AppState>();
+            match state.db.get_provider_by_id(&id, &app) {
+                Ok(Some(provider))
+                    if provider
+                        .meta
+                        .as_ref()
+                        .and_then(|meta| meta.remote_synced)
+                        .unwrap_or(false) =>
+                {
+                    match state.db.delete_provider(&app, &id) {
+                        Ok(_) => log::info!("[remote] 已清理远程 provider 的桌面影子记录 `{id}`"),
+                        Err(error) => {
+                            log::warn!("[remote] 清理远程 provider 影子记录失败: {error}")
+                        }
+                    }
+                }
+                Ok(_) => {}
+                Err(error) => log::warn!("[remote] 读取待清理的影子 provider 失败: {error}"),
             }
         }
     }

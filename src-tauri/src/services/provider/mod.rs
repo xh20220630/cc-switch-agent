@@ -4246,7 +4246,7 @@ impl ProviderService {
         base_url.trim().trim_end_matches('/').to_string()
     }
 
-    /// List all providers for an app type
+/// List all providers for an app type
     pub fn list(
         state: &AppState,
         app_type: AppType,
@@ -4254,7 +4254,20 @@ impl ProviderService {
         if app_type == AppType::Pi {
             return pi::list(state);
         }
-        state.db.get_all_providers(app_type.as_str())
+        let all = state.db.get_all_providers(app_type.as_str())?;
+        // 远程同步的影子记录(remoteSynced)仅供桌面代理转发 /remote 请求时读取
+        // 真实凭据，不属于本地环境，不在本地列表中展示。
+        let filtered: IndexMap<String, Provider> = all
+            .into_iter()
+            .filter(|(_, provider)| {
+                !provider
+                    .meta
+                    .as_ref()
+                    .and_then(|meta| meta.remote_synced)
+                    .unwrap_or(false)
+            })
+            .collect();
+        Ok(filtered)
     }
 
     /// Get current provider ID
