@@ -458,7 +458,7 @@ describe("useProviderActions", () => {
       await result.current.switchProvider(provider);
     });
 
-    expect(switchProviderMutateAsync).toHaveBeenCalledWith("generated-uuid");
+    expect(switchProviderMutateAsync).toHaveBeenCalledWith(provider);
     expect(toastErrorMock).not.toHaveBeenCalled();
   });
 

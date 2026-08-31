@@ -121,6 +121,12 @@ vi.mock("@/components/UsageScriptModal", () => ({
     ) : null,
 }));
 
+// ProviderSyncDialog 依赖 useRuntimeTarget（真实 Provider 树外无法渲染）；App 用例
+// 不涉及同步对话框的交互，直接 mock 为空组件，与 Add/Edit 对话框的处理方式一致。
+vi.mock("@/components/providers/ProviderSyncDialog", () => ({
+  ProviderSyncDialog: () => null,
+}));
+
 vi.mock("@/components/ConfirmDialog", () => ({
   ConfirmDialog: ({ isOpen, message, onConfirm, onCancel }: any) =>
     isOpen ? (

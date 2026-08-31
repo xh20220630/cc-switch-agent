@@ -213,6 +213,11 @@ pub fn get_app_config_dir() -> PathBuf {
     // 同时也避免新安装因为 `HOME` 被设置而写入非预期路径。
     #[cfg(windows)]
     {
+        // 测试隔离：CC_SWITCH_TEST_HOME 已显式把 home 指到临时目录，
+        // 此时跳过 v3.10.3 遗留目录回退，避免测试读写真实用户配置。
+        if std::env::var("CC_SWITCH_TEST_HOME").is_ok() {
+            return default_dir;
+        }
         let default_db = default_dir.join("cc-switch.db");
         if !default_db.exists() {
             if let Ok(home_env) = std::env::var("HOME") {

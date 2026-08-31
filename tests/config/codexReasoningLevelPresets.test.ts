@@ -51,9 +51,10 @@ describe("Codex preset pre-filled reasoning levels", () => {
     ["Tencent Hunyuan", "hy3-preview", ["low", "high"]],
     // LongCat 无档位可调：全站唯一 effort 证据=官方示例的 high
     ["Longcat", "LongCat-2.0", ["high"]],
-    // xAI Reasoning guide 模型级枚举；grok-4.5 不可关思考故无 none
-    ["xAI (Grok)", "grok-4.5", ["low", "medium", "high"]],
-    ["xAI (Grok) OAuth", "grok-4.5", ["low", "medium", "high"]],
+    // xAI Reasoning guide 模型级枚举；grok-4.5 不可关思考故无 none。
+    // 2026-08-30 实测 native /v1/responses：接受 low/medium/high/xhigh，拒绝 max
+    ["xAI (Grok)", "grok-4.5", ["low", "medium", "high", "xhigh"]],
+    ["xAI (Grok) OAuth", "grok-4.5", ["low", "medium", "high", "xhigh"]],
     // DeepSeek 直连照抄官方 catalog 镜像（Jason 2026-08-15 拍板：表单可见性
     // 优先，接受快照过时风险——官方目录变更时须同步）
     ["DeepSeek", "deepseek-v4-flash", ["low", "high", "max"]],

@@ -2014,6 +2014,15 @@ requires_openai_auth = true
         let db = Arc::new(Database::memory().expect("init db"));
         let state = AppState::new(db.clone());
 
+        // 用随机端口启动代理，避免与已运行的 cc-switch 实例（固定 15721）冲突。
+        db.update_proxy_config(ProxyConfig {
+            live_takeover_active: true,
+            listen_port: 0,
+            ..Default::default()
+        })
+        .await
+        .expect("update proxy config");
+
         let mut original = Provider::with_id(
             "p1".into(),
             "Desktop A".into(),
@@ -2107,9 +2116,15 @@ requires_openai_auth = true
 
         let profile_path = claude_desktop_profile_path(home.dir.path());
         let profile: Value = read_json_file(&profile_path).expect("read desktop profile");
+        let proxy_port = state
+            .proxy_service
+            .get_status()
+            .await
+            .expect("get proxy status")
+            .port;
         assert_eq!(
             profile["inferenceGatewayBaseUrl"],
-            json!("http://127.0.0.1:15721/claude-desktop"),
+            json!(format!("http://127.0.0.1:{proxy_port}/claude-desktop")),
             "desktop profile should stay pointed at the local gateway during takeover"
         );
         assert_eq!(profile["inferenceGatewayAuthScheme"], json!("bearer"));
@@ -4436,7 +4451,7 @@ impl ProviderService {
         base_url.trim().trim_end_matches('/').to_string()
     }
 
-/// List all providers for an app type
+    /// List all providers for an app type
     pub fn list(
         state: &AppState,
         app_type: AppType,
