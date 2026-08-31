@@ -177,7 +177,32 @@
         "apiKeyPlaceholder": "请输入 Gemini API Key"
       }
     },
-    "duplicateLiveIdsLoadFailed": "读取配置中的供应商标识失败，请先修复配置后再试"
+    "duplicateLiveIdsLoadFailed": "读取配置中的供应商标识失败，请先修复配置后再试",
+    "sync": {
+      "title": "同步 Provider",
+      "remoteUnavailable": "远程未连接，暂时无法从远程同步",
+      "swapDirection": "切换方向",
+      "directionDescLocalToRemote": "将本机的 Provider 同步到远程环境",
+      "directionDescRemoteToLocal": "将远程的 Provider 同步到本机环境",
+      "targetLocal": "本机",
+      "targetRemote": "远程",
+      "searchPlaceholder": "搜索 Provider 名称或接口地址...",
+      "selectAll": "全选",
+      "selectedCount": "已选择 {{count}} / {{total}}",
+      "conflictNote": "{{target}}已存在同名配置，将保存为 {{newName}}",
+      "alreadySynced": "已同步过，将跳过",
+      "fromTargetSkipped": "来自{{target}}，将跳过",
+      "skippedHint": "（{{count}} 个已同步过，将跳过）",
+      "empty": "没有可同步的 Provider",
+      "noResults": "没有匹配的 Provider",
+      "retry": "重试",
+      "remoteOffline": "远程未连接，无法获取远程 Provider",
+      "noneSelected": "请选择要同步的 Provider",
+      "summary": "{{count}} 个 Provider 将同步到{{target}}",
+      "confirm": "同步到{{target}}",
+      "success": "已同步 {{count}} 个 Provider",
+      "failed": "同步失败"
+    }
   },
   "claudeCode": {
     "needsRouting": "需要路由",

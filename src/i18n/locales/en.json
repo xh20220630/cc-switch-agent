@@ -177,7 +177,32 @@
         "apiKeyPlaceholder": "Enter Gemini API Key"
       }
     },
-    "duplicateLiveIdsLoadFailed": "Failed to read provider identifiers from config, please fix the config and try again"
+    "duplicateLiveIdsLoadFailed": "Failed to read provider identifiers from config, please fix the config and try again",
+    "sync": {
+      "title": "Sync Providers",
+      "remoteUnavailable": "Remote is offline — cannot sync from remote",
+      "swapDirection": "Swap direction",
+      "directionDescLocalToRemote": "Copy providers from this machine to the remote environment",
+      "directionDescRemoteToLocal": "Copy providers from the remote environment to this machine",
+      "targetLocal": "local",
+      "targetRemote": "remote",
+      "searchPlaceholder": "Search provider name or URL...",
+      "selectAll": "Select all",
+      "selectedCount": "{{count}} / {{total}} selected",
+      "conflictNote": "A provider with this name exists on {{target}}, will be saved as {{newName}}",
+      "alreadySynced": "Already synced, will be skipped",
+      "fromTargetSkipped": "From {{target}}, will be skipped",
+      "skippedHint": "({{count}} already synced, will be skipped)",
+      "empty": "No providers to sync",
+      "noResults": "No matching providers",
+      "retry": "Retry",
+      "remoteOffline": "Remote is offline, unable to fetch remote providers",
+      "noneSelected": "Select providers to sync",
+      "summary": "{{count}} provider(s) will be synced to {{target}}",
+      "confirm": "Sync to {{target}}",
+      "success": "Synced {{count}} provider(s)",
+      "failed": "Sync failed"
+    }
   },
   "claudeCode": {
     "needsRouting": "Needs Routing",
