@@ -128,7 +128,16 @@ pub async fn handle_messages(
     State(state): State<ProxyState>,
     request: axum::extract::Request,
 ) -> Result<axum::response::Response, ProxyError> {
-    handle_messages_for_app(state, request, AppType::Claude, "Claude", "claude", None, false).await
+    handle_messages_for_app(
+        state,
+        request,
+        AppType::Claude,
+        "Claude",
+        "claude",
+        None,
+        false,
+    )
+    .await
 }
 
 /// 远程隧道请求(经 SSH -R 转发)的 Claude Messages 入口。
@@ -137,7 +146,16 @@ pub async fn handle_remote_messages(
     State(state): State<ProxyState>,
     request: axum::extract::Request,
 ) -> Result<axum::response::Response, ProxyError> {
-    handle_messages_for_app(state, request, AppType::Claude, "Claude", "claude", None, true).await
+    handle_messages_for_app(
+        state,
+        request,
+        AppType::Claude,
+        "Claude",
+        "claude",
+        None,
+        true,
+    )
+    .await
 }
 
 pub async fn handle_claude_desktop_messages(
@@ -1078,8 +1096,16 @@ pub async fn handle_alpha_search(
     let body: Value = serde_json::from_slice(&body_bytes)
         .map_err(|e| ProxyError::InvalidRequest(format!("Failed to parse request body: {e}")))?;
 
-    let mut ctx =
-        RequestContext::new(&state, &body, &headers, AppType::Codex, "Codex", "codex", false).await?;
+    let mut ctx = RequestContext::new(
+        &state,
+        &body,
+        &headers,
+        AppType::Codex,
+        "Codex",
+        "codex",
+        false,
+    )
+    .await?;
     let endpoint = endpoint_with_query(&uri, "/alpha/search");
 
     let forwarder = ctx.create_forwarder(&state);

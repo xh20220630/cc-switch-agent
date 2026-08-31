@@ -1,4 +1,4 @@
-﻿use std::collections::HashMap;
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use base64::engine::general_purpose::STANDARD as BASE64;
@@ -84,10 +84,7 @@ impl RemoteCredentialStore {
             return Ok(CredentialDocument::default());
         }
         serde_json::from_slice(&bytes).map_err(|error| {
-            CredentialError::Corrupted(format!(
-                "{}: {error}",
-                self.path.display()
-            ))
+            CredentialError::Corrupted(format!("{}: {error}", self.path.display()))
         })
     }
 
@@ -95,15 +92,13 @@ impl RemoteCredentialStore {
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let temp_path = self
-            .path
-            .with_extension(format!(
-                "{}.tmp",
-                self.path
-                    .extension()
-                    .and_then(|value| value.to_str())
-                    .unwrap_or("json")
-            ));
+        let temp_path = self.path.with_extension(format!(
+            "{}.tmp",
+            self.path
+                .extension()
+                .and_then(|value| value.to_str())
+                .unwrap_or("json")
+        ));
         let bytes = serde_json::to_vec_pretty(document)?;
         std::fs::write(&temp_path, bytes)?;
         if let Err(error) = std::fs::rename(&temp_path, &self.path) {
@@ -144,10 +139,12 @@ mod platform {
             )
         };
         if ok == 0 {
-            return Err(CredentialError::Platform(std::io::Error::last_os_error().to_string()));
+            return Err(CredentialError::Platform(
+                std::io::Error::last_os_error().to_string(),
+            ));
         }
-        let result = unsafe { std::slice::from_raw_parts(output.pbData, output.cbData as usize) }
-            .to_vec();
+        let result =
+            unsafe { std::slice::from_raw_parts(output.pbData, output.cbData as usize) }.to_vec();
         unsafe {
             LocalFree(output.pbData.cast());
         }
@@ -175,10 +172,12 @@ mod platform {
             )
         };
         if ok == 0 {
-            return Err(CredentialError::Platform(std::io::Error::last_os_error().to_string()));
+            return Err(CredentialError::Platform(
+                std::io::Error::last_os_error().to_string(),
+            ));
         }
-        let result = unsafe { std::slice::from_raw_parts(output.pbData, output.cbData as usize) }
-            .to_vec();
+        let result =
+            unsafe { std::slice::from_raw_parts(output.pbData, output.cbData as usize) }.to_vec();
         unsafe {
             LocalFree(output.pbData.cast());
         }

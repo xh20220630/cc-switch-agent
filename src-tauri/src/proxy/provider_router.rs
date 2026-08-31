@@ -100,10 +100,7 @@ impl ProviderRouter {
             .transpose()?
             .flatten();
         // 远程 current 指向桌面 DB 中不存在的 provider 时，回退本地 current。
-        if is_remote
-            && current_id.is_some()
-            && current_provider.is_none()
-        {
+        if is_remote && current_id.is_some() && current_provider.is_none() {
             log::warn!("[{app_type}] 远程 current provider 不在桌面 DB，回退本地 current");
         }
 
@@ -542,7 +539,8 @@ mod tests {
             .unwrap();
         assert_eq!(providers.len(), 1);
         assert_eq!(providers[0].id, official.id);
-    }    #[tokio::test]
+    }
+    #[tokio::test]
     #[serial]
     async fn stale_codex_official_queue_entries_are_not_retry_targets() {
         let _home = TempHome::new();

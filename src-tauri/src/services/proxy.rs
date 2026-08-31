@@ -3879,9 +3879,7 @@ impl ProxyService {
         if let Some(server) = self.server.read().await.as_ref() {
             server.set_remote_current(app_type, provider_id).await;
         } else {
-            log::warn!(
-                "[proxy] 代理未运行，远程路由 current[{app_type}] = {provider_id} 未生效"
-            );
+            log::warn!("[proxy] 代理未运行，远程路由 current[{app_type}] = {provider_id} 未生效");
         }
     }
 

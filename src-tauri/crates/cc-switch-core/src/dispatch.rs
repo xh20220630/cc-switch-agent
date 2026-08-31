@@ -70,16 +70,15 @@ fn dispatch_provider(
             let args: IdArgs = parse_args(args)?;
             ProviderService::delete(state, &args.app, &args.id)?;
             Ok(Value::Bool(true))
-        }        "provider.switch" => {
+        }
+        "provider.switch" => {
             let args: SwitchArgs = parse_args(args)?;
             match args.provider {
                 // 桌面可附带改写后的投影快照(本地路由模式: base_url 指向桌面代理、
                 // token 为占位符), 此时不再从远端 DB 读取, 与"切换+投影"保持同一次语义。
-                Some(provider) => {
-                    to_value(ProviderService::switch_with_projection(
-                        state, &args.app, &args.id, provider,
-                    )?)
-                }
+                Some(provider) => to_value(ProviderService::switch_with_projection(
+                    state, &args.app, &args.id, provider,
+                )?),
                 None => to_value(ProviderService::switch(state, &args.app, &args.id)?),
             }
         }

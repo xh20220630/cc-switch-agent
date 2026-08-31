@@ -142,7 +142,11 @@ impl RemoteRuntimeState {
         Ok(deleted)
     }
 
-    pub fn save_target_password(&self, target_id: &str, password: &str) -> Result<(), RemoteRuntimeError> {
+    pub fn save_target_password(
+        &self,
+        target_id: &str,
+        password: &str,
+    ) -> Result<(), RemoteRuntimeError> {
         Ok(self.credentials.set(target_id, password)?)
     }
 
@@ -328,7 +332,9 @@ impl RemoteRuntimeError {
     pub fn code(&self) -> &str {
         match self {
             Self::Store(_) => "REMOTE_TARGET_STORE_ERROR",
-            Self::Credential(CredentialError::UnsupportedPlatform) => "CREDENTIAL_STORE_UNSUPPORTED",
+            Self::Credential(CredentialError::UnsupportedPlatform) => {
+                "CREDENTIAL_STORE_UNSUPPORTED"
+            }
             Self::Credential(_) => "CREDENTIAL_STORE_ERROR",
             Self::StatePoisoned(_) => "REMOTE_STATE_ERROR",
             Self::TargetNotFound(_) => "REMOTE_TARGET_NOT_FOUND",
@@ -447,8 +453,7 @@ mod password_e2e_tests {
         let host = std::env::var("CC_SWITCH_TEST_SSH_TARGET").expect("设置测试服务器地址");
         let username =
             std::env::var("CC_SWITCH_TEST_SSH_USER").unwrap_or_else(|_| "root".to_string());
-        let password =
-            std::env::var("CC_SWITCH_TEST_SSH_PASSWORD").expect("设置测试服务器密码");
+        let password = std::env::var("CC_SWITCH_TEST_SSH_PASSWORD").expect("设置测试服务器密码");
 
         let temp = tempfile::tempdir().expect("创建 runtime fixture");
         let dir = temp.keep();
@@ -474,19 +479,20 @@ mod password_e2e_tests {
         runtime
             .save_target_password(target_id, &password)
             .expect("保存密码到凭据存储");
-        assert!(runtime.has_target_password(target_id).expect("检查密码存在"));
-        let snapshot = runtime.connect_target(target_id, None).expect("密码连接成功");
+        assert!(runtime
+            .has_target_password(target_id)
+            .expect("检查密码存在"));
+        let snapshot = runtime
+            .connect_target(target_id, None)
+            .expect("密码连接成功");
         assert_eq!(snapshot.status, RemoteConnectionStatus::Online);
 
         // 删除凭据后必须从存储中消失；后续连接（若有默认密钥）不再走密码路径。
         runtime.delete_target_password(target_id).expect("删除密码");
-        assert!(!runtime.has_target_password(target_id).expect("检查密码已删除"));
-        assert!(
-            !runtime
-                .list_targets()
-                .expect("读取目标列表")[0]
-                .has_saved_password
-        );
+        assert!(!runtime
+            .has_target_password(target_id)
+            .expect("检查密码已删除"));
+        assert!(!runtime.list_targets().expect("读取目标列表")[0].has_saved_password);
     }
 
     /// 端到端主机密钥信任集成测试：需要 CC_SWITCH_TEST_SSH_TARGET 环境变量指向真实服务器。
@@ -496,7 +502,9 @@ mod password_e2e_tests {
     #[ignore]
     fn trust_host_key_end_to_end() {
         let host = std::env::var("CC_SWITCH_TEST_SSH_TARGET").expect("设置测试服务器地址");
-        let known_hosts = crate::config::get_home_dir().join(".ssh").join("known_hosts");
+        let known_hosts = crate::config::get_home_dir()
+            .join(".ssh")
+            .join("known_hosts");
         let backup = known_hosts.with_extension("cc-switch-test-bak");
         if known_hosts.exists() {
             std::fs::copy(&known_hosts, &backup).expect("备份 known_hosts");

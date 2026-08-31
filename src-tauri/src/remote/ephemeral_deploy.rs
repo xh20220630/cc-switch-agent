@@ -39,7 +39,9 @@ pub fn build_scp_args(
     args.push(OsString::from("StrictHostKeyChecking=yes"));
     if use_password {
         args.push(OsString::from("-o"));
-        args.push(OsString::from("PreferredAuthentications=publickey,password"));
+        args.push(OsString::from(
+            "PreferredAuthentications=publickey,password",
+        ));
         args.push(OsString::from("-o"));
         args.push(OsString::from("NumberOfPasswordPrompts=1"));
     }

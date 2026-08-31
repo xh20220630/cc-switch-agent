@@ -80,8 +80,13 @@ export const remoteApi = {
     });
   },
 
-  async invokeRemote<T>(command: string, args: Record<string, unknown> = {}): Promise<T> {
-    const snapshot = await localInvoke<RuntimeSnapshot>("remote_get_runtime_snapshot");
+  async invokeRemote<T>(
+    command: string,
+    args: Record<string, unknown> = {},
+  ): Promise<T> {
+    const snapshot = await localInvoke<RuntimeSnapshot>(
+      "remote_get_runtime_snapshot",
+    );
     if (snapshot.status !== "online") {
       throw new Error(snapshot.errorMessage || "远程未连接");
     }

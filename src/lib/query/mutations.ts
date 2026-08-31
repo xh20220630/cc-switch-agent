@@ -17,9 +17,7 @@ import { usageKeys } from "@/lib/query/usage";
 import { providerKeys } from "@/lib/query/queries";
 import { useRuntimeQueryScope } from "@/lib/runtime/queryScope";
 import { invalidatePiProviderCaches } from "@/lib/query/pi";
-import {
-  GROKBUILD_OFFICIAL_PROVIDER_ID,
-} from "@/utils/providerCapabilities";
+import { GROKBUILD_OFFICIAL_PROVIDER_ID } from "@/utils/providerCapabilities";
 
 export const useAddProviderMutation = (appId: AppId) => {
   const queryClient = useQueryClient();

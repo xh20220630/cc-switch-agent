@@ -320,10 +320,7 @@ impl ProxyServer {
                 "/remote/v1/chat/completions",
                 post(handlers::handle_remote_chat_completions),
             )
-            .route(
-                "/remote/responses",
-                post(handlers::handle_remote_responses),
-            )
+            .route("/remote/responses", post(handlers::handle_remote_responses))
             .route(
                 "/remote/v1/responses",
                 post(handlers::handle_remote_responses),

@@ -75,7 +75,9 @@ pub fn build_ssh_args(
     args.push(OsString::from("StrictHostKeyChecking=yes"));
     if use_password {
         args.push(OsString::from("-o"));
-        args.push(OsString::from("PreferredAuthentications=publickey,password"));
+        args.push(OsString::from(
+            "PreferredAuthentications=publickey,password",
+        ));
         args.push(OsString::from("-o"));
         args.push(OsString::from("NumberOfPasswordPrompts=1"));
     }
@@ -151,7 +153,9 @@ fn scan_host_keys(target: &RemoteTargetConfig) -> Result<(String, Vec<String>), 
     }
     let keys = String::from_utf8_lossy(&output.stdout).into_owned();
     if keys.trim().is_empty() {
-        return Err(RemoteSshError::CommandFailed("未从服务器获取到主机密钥".to_string()));
+        return Err(RemoteSshError::CommandFailed(
+            "未从服务器获取到主机密钥".to_string(),
+        ));
     }
     let fingerprints = keys
         .lines()
@@ -176,7 +180,9 @@ pub fn host_key_fingerprints(target: &RemoteTargetConfig) -> Result<Vec<String>,
 /// "首次连接信任主机密钥"。返回写入的密钥指纹。
 pub fn trust_host_key(target: &RemoteTargetConfig) -> Result<Vec<String>, RemoteSshError> {
     let (keys, fingerprints) = scan_host_keys(target)?;
-    let known_hosts = crate::config::get_home_dir().join(".ssh").join("known_hosts");
+    let known_hosts = crate::config::get_home_dir()
+        .join(".ssh")
+        .join("known_hosts");
     if let Some(parent) = known_hosts.parent() {
         std::fs::create_dir_all(parent).map_err(RemoteSshError::Spawn)?;
     }
@@ -190,11 +196,11 @@ pub fn trust_host_key(target: &RemoteTargetConfig) -> Result<Vec<String>, Remote
 }
 
 /// 为任意 ssh/scp 子进程接入密码，返回需要搭配传给 build_ssh_args 的辅助对象。
-fn prepare_password_auth(target: &RemoteTargetConfig) -> Result<Option<AskPassGuard>, RemoteSshError> {
+fn prepare_password_auth(
+    target: &RemoteTargetConfig,
+) -> Result<Option<AskPassGuard>, RemoteSshError> {
     match target.password.as_deref() {
-        Some(password) if !password.is_empty() => {
-            Ok(Some(AskPassGuard::create(password)?))
-        }
+        Some(password) if !password.is_empty() => Ok(Some(AskPassGuard::create(password)?)),
         _ => Ok(None),
     }
 }
@@ -331,10 +337,7 @@ pub fn preflight(target: &RemoteTargetConfig) -> Result<RemotePlatform, RemoteSs
     if let Some(askpass) = askpass.as_ref() {
         askpass.apply(&mut command);
     }
-    let output = command
-        .args(args)
-        .output()
-        .map_err(RemoteSshError::Spawn)?;
+    let output = command.args(args).output().map_err(RemoteSshError::Spawn)?;
     if !output.status.success() {
         return Err(classify_ssh_failure(&String::from_utf8_lossy(
             &output.stderr,

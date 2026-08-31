@@ -564,10 +564,7 @@ pub struct ProviderMeta {
     pub github_account_id: Option<String>,
     /// 远程模式同步到桌面的 provider 标记：桌面代理接管恢复时不得用本地 live
     /// 的 token 覆盖其真实凭据（本地 live 可能是其它 provider 的配置）。
-    #[serde(
-        rename = "remoteSynced",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "remoteSynced", skip_serializing_if = "Option::is_none")]
     pub remote_synced: Option<bool>,
 }
 

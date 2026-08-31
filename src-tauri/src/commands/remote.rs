@@ -76,13 +76,13 @@ pub fn remote_has_target_password(
     state: State<'_, RemoteRuntimeState>,
     #[allow(non_snake_case)] targetId: String,
 ) -> Result<bool, String> {
-    state.has_target_password(&targetId).map_err(serialize_error)
+    state
+        .has_target_password(&targetId)
+        .map_err(serialize_error)
 }
 
 #[tauri::command]
-pub async fn remote_trust_target_host(
-    target: RemoteTargetConfig,
-) -> Result<Vec<String>, String> {
+pub async fn remote_trust_target_host(target: RemoteTargetConfig) -> Result<Vec<String>, String> {
     // ssh-keyscan 可能等待网络超时，离开命令线程避免阻塞本地 UI。
     tauri::async_runtime::spawn_blocking(move || {
         trust_host_key(&target)
@@ -137,7 +137,9 @@ pub async fn remote_set_active_target(
                 .get_status()
                 .await
                 .map_err(|error| format!("读取桌面代理状态失败: {error}"))?;
-            status.running.then(|| LocalForwardSpec::same_port(status.port))
+            status
+                .running
+                .then(|| LocalForwardSpec::same_port(status.port))
         }
         None => None,
     };
@@ -174,9 +176,11 @@ pub async fn remote_set_active_target(
                 .map(|snapshot| snapshot.generation)
                 .unwrap_or(0);
             let outcome = tauri::async_runtime::spawn_blocking(move || {
-                handle
-                    .state::<RemoteRuntimeState>()
-                    .invoke_remote(generation, "usage.session_sync", serde_json::Value::Null)
+                handle.state::<RemoteRuntimeState>().invoke_remote(
+                    generation,
+                    "usage.session_sync",
+                    serde_json::Value::Null,
+                )
             })
             .await;
             match outcome {
@@ -381,25 +385,18 @@ async fn maybe_rewrite_provider_switch_for_remote_proxy(
         },
     };
     let Some(settings) = provider_value.get_mut("settingsConfig") else {
-        log::warn!(
-            "[remote] 跳过本地路由改写: provider `{id}` 缺少 settingsConfig"
-        );
+        log::warn!("[remote] 跳过本地路由改写: provider `{id}` 缺少 settingsConfig");
         return (args, None);
     };
     let Some(env) = settings.get_mut("env").and_then(Value::as_object_mut) else {
-        log::warn!(
-            "[remote] 跳过本地路由改写: provider `{id}` settingsConfig 缺少 env 对象"
-        );
+        log::warn!("[remote] 跳过本地路由改写: provider `{id}` settingsConfig 缺少 env 对象");
         return (args, None);
     };
     // 与桌面代理接管语义一致：base_url 指向本地代理，token 替换为占位符，
     // 代理侧从 DB 读取真实凭据并按 provider 的 apiKeyField 选择 x-api-key。
     // `/remote` 路径前缀标记远程来源：桌面代理据此按"远程 current"转发，
     // 与本地请求(无前缀,按本地 current)隔离。
-    let proxy_base_url = format!(
-        "http://127.0.0.1:{}{}",
-        status.port, REMOTE_ROUTE_PREFIX
-    );
+    let proxy_base_url = format!("http://127.0.0.1:{}{}", status.port, REMOTE_ROUTE_PREFIX);
     env.insert(
         "ANTHROPIC_BASE_URL".to_string(),
         Value::String(proxy_base_url.clone()),
