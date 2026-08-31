@@ -226,7 +226,10 @@ pub enum CredentialError {
 mod credential_store_tests {
     use super::*;
 
+    // DPAPI 仅 Windows 支持；非 Windows encrypt/decrypt 返回 UnsupportedPlatform，
+    // 因此加解密往返只在 Windows runner 上验证。
     #[test]
+    #[cfg(target_os = "windows")]
     fn round_trips_password_per_target() {
         let temp = tempfile::tempdir().expect("创建凭据 fixture");
         let store = RemoteCredentialStore::at(temp.keep().join("credentials.json"));
