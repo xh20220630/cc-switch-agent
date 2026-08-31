@@ -240,7 +240,7 @@ export function UsageDashboard({
     setSyncingSession(true);
     try {
       const result = await usageApi.syncSessionUsage();
-      await queryClient.invalidateQueries({ queryKey: usageKeys.all });
+      await queryClient.invalidateQueries({ queryKey: usageKeys.all(scope) });
       const message = t("usage.sessionSync.syncCompleted", {
         imported: result.imported,
         files: result.filesScanned,
