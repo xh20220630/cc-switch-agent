@@ -32,3 +32,5 @@ copilot-api
 CODEBUDDY.md
 mainWindow.js
 /.cargo/
+# Tauri signing key（误生成到仓库根目录的 ~ 字面目录，私钥禁止入库）
+/~/
