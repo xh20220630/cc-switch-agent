@@ -90,6 +90,9 @@ fn ssh_args_are_separate_and_reject_option_injection() {
     }));
     assert!(args.contains(&OsString::from("BatchMode=yes")));
     assert!(args.contains(&OsString::from("StrictHostKeyChecking=yes")));
+    // 长驻会话探活参数必须始终存在，防止回归后断链再次静默表现为"远程无数据"。
+    assert!(args.contains(&OsString::from("ServerAliveInterval=15")));
+    assert!(args.contains(&OsString::from("ServerAliveCountMax=3")));
     assert!(args.contains(&OsString::from("prod-api")));
 
     config.host_alias = "-oProxyCommand=bad".to_string();

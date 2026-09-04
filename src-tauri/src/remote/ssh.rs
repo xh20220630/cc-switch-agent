@@ -73,6 +73,13 @@ pub fn build_ssh_args(
     });
     args.push(OsString::from("-o"));
     args.push(OsString::from("StrictHostKeyChecking=yes"));
+    // 长驻会话必须主动探活：NAT/sshd 超时静默断链后，没有 ServerAlive 的半开 TCP
+    // 会让 invoke 在死管道上空等整个超时周期，表现为"远程统计无数据、同步失败"。
+    // 15s x 3 次无响应即让 ssh 自行退出，使断链在 45 秒内显形为可读错误。
+    args.push(OsString::from("-o"));
+    args.push(OsString::from("ServerAliveInterval=15"));
+    args.push(OsString::from("-o"));
+    args.push(OsString::from("ServerAliveCountMax=3"));
     if use_password {
         args.push(OsString::from("-o"));
         args.push(OsString::from(
