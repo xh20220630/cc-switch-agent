@@ -76,6 +76,8 @@ pub(super) fn sync_non_codex_sessions(
         sync_grokbuild(state, cancellation),
     );
     cancellation.check()?;
+    merge_source(&mut aggregate, "Kimi", sync_kimi(state, cancellation));
+    cancellation.check()?;
     Ok(aggregate)
 }
 
@@ -515,6 +517,119 @@ fn record_grok_row(
         },
         result,
     )
+}
+
+/// Kimi Code CLI 的会话记录：`$KIMI_CODE_HOME`（缺省 `~/.kimi-code`）下
+/// `sessions/<workDirKey>/<sessionId>/agents/<agentId>/wire.jsonl`，每个子 Agent
+/// 各自一份 append-only 的 JSONL；`usage.record` 行携带单次 LLM 请求的 token 明细，
+/// 但不自报费用，成本由同步末尾的统一回填按 model_pricing 补齐。
+pub(super) fn sync_kimi(
+    state: &HeadlessState,
+    cancellation: &OperationCancellation,
+) -> Result<SessionSyncResult, CoreError> {
+    let root = kimi_home_override().unwrap_or_else(|| state.home().join(".kimi-code"));
+    let sessions = root.join("sessions");
+    let mut files = Vec::new();
+    // 深度 5 覆盖 sessions/<workDirKey>/<sessionId>/agents/<agentId>/wire.jsonl；
+    // 文件名限定 wire.jsonl，避免扫到 plans、tasks 等无关文件。
+    collect_named_files(
+        &sessions,
+        Some("wire.jsonl"),
+        Some("jsonl"),
+        5,
+        cancellation,
+        &mut files,
+    )?;
+    files.sort();
+    let mut result = scanned_result(&files);
+    for path in files {
+        cancellation.check()?;
+        let (should_scan, modified) = file_requires_scan(state, &path)?;
+        if !should_scan {
+            continue;
+        }
+        let file = match fs::File::open(&path) {
+            Ok(file) => file,
+            Err(error) => {
+                result.errors.push(format!("{}: {error}", path.display()));
+                continue;
+            }
+        };
+        let path_session_id = kimi_path_segment(&path, 3);
+        let path_agent_id = kimi_path_segment(&path, 1);
+        let mut line_count = 0_i64;
+        for line in BufReader::new(file).lines() {
+            cancellation.check()?;
+            line_count = line_count.saturating_add(1);
+            let Ok(line) = line else { continue };
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
+                continue;
+            };
+            if string_at(&value, &["type"]).as_deref() != Some("usage.record") {
+                continue;
+            }
+            let Some(usage) = value.get("usage") else {
+                continue;
+            };
+            let input = u64_at(usage, &["inputOther"]);
+            let output = u64_at(usage, &["output"]);
+            let cache_read = u64_at(usage, &["inputCacheRead"]);
+            let cache_creation = u64_at(usage, &["inputCacheCreation"]);
+            if input + output + cache_read + cache_creation == 0 {
+                continue;
+            }
+            // usage.record 没有请求级 id，但 time 是毫秒时间戳；同一 Agent 同一毫秒内
+            // 两次请求的概率可忽略，配合会话与 Agent 维度足以做幂等键。
+            let Some(time_ms) = i64_at(&value, &["time"]) else {
+                continue;
+            };
+            let session_id = path_session_id
+                .clone()
+                .unwrap_or_else(|| "unknown".to_string());
+            let agent_id = string_at(&value, &["agentId"])
+                .or_else(|| path_agent_id.clone())
+                .unwrap_or_else(|| "unknown".to_string());
+            let row = SessionRow {
+                request_id: format!("kimi_session:{session_id}:{agent_id}:{time_ms}"),
+                provider_id: "_kimi_session",
+                app_type: "kimi",
+                model: string_at(&value, &["model"]).unwrap_or_else(|| "unknown".to_string()),
+                input_tokens: input,
+                output_tokens: output,
+                cache_read_tokens: cache_read,
+                cache_creation_tokens: cache_creation,
+                input_token_semantics: INPUT_TOKEN_SEMANTICS_FRESH,
+                total_cost: "0".to_string(),
+                latency_ms: 0,
+                session_id: Some(session_id),
+                created_at: normalize_epoch(time_ms),
+                data_source: "kimi_session",
+            };
+            record_row(state, row, &mut result)?;
+        }
+        update_sync_state(state, &path, modified, line_count)?;
+    }
+    Ok(result)
+}
+
+/// 数据根目录可被 `KIMI_CODE_HOME` 整体迁移（官方支持），桌面与远端 Agent 统一遵守。
+fn kimi_home_override() -> Option<PathBuf> {
+    std::env::var_os("KIMI_CODE_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+/// wire.jsonl 路径为 .../sessions/<workDirKey>/<sessionId>/agents/<agentId>/wire.jsonl，
+/// levels_up=3 取 sessionId 目录名，levels_up=1 取 agentId 目录名。
+fn kimi_path_segment(path: &Path, levels_up: usize) -> Option<String> {
+    let mut current = path.parent();
+    for _ in 1..levels_up {
+        current = current.and_then(Path::parent);
+    }
+    current
+        .and_then(|directory| directory.file_name())
+        .and_then(|name| name.to_str())
+        .map(str::to_string)
 }
 
 fn record_row(

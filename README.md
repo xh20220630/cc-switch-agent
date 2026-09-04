@@ -24,7 +24,7 @@ This repository is an independent fork of [CC Switch](https://github.com/farion1
 - User manual: <https://github.com/farion1231/cc-switch/tree/main/docs/user-manual>
 - Changelog: <https://github.com/farion1231/cc-switch/blob/main/CHANGELOG.md>
 
-This fork **keeps all upstream capabilities and adds a "Remote Server Mode"**: connect to a remote Linux server over SSH, run an ephemeral Agent on the remote side, read/write the remote `~/.cc-switch` database directly, import and display session usage from Claude/Gemini/OpenCode/Grok/Codex running on the remote machine, and sync providers between local and remote.
+This fork **keeps all upstream capabilities and adds a "Remote Server Mode"**: connect to a remote Linux server over SSH, run an ephemeral Agent on the remote side, read/write the remote `~/.cc-switch` database directly, import and display session usage from Claude/Gemini/OpenCode/Grok/Codex/Kimi running on the remote machine, and sync providers between local and remote.
 
 ---
 
@@ -37,7 +37,7 @@ Many users run Claude Code / Codex / Gemini on a **remote Linux server** (cloud 
 - **SSH target management** — auto-discover targets from `~/.ssh/config` or add manually; connection test, edit, delete
 - **Ephemeral Agent, in and out** — the desktop bundles a musl statically-linked Linux Agent (x86_64 / aarch64). On connect it's scp'd to `/tmp`, run with `--stdio`, and self-deletes on exit (trap cleanup + desktop-side fallback)
 - **Remote DB read/write directly** — the Agent opens the remote user's own `~/.cc-switch/cc-switch.db`, behaving exactly like local (the same Core importer) — not a "pulled copy"
-- **Remote usage sync** — syncs automatically once on successful connect, once more when entering the Usage page, plus manual sync anytime; imports session logs from all five sources (Claude / Gemini / OpenCode / Grok / Codex) into the remote database
+- **Remote usage sync** — syncs automatically once on successful connect, once more when entering the Usage page, plus manual sync anytime; imports session logs from all six sources (Claude / Gemini / OpenCode / Grok / Codex / Kimi) into the remote database
 - **Provider sync** — sync providers between local and remote via a dialog with search, dedup-skip and retry
 - **Runtime switcher** — switch between "local / remote target" in the top bar, with live status (connecting / online / offline / reconnecting / incompatible)
 
@@ -68,7 +68,7 @@ Many users run Claude Code / Codex / Gemini on a **remote Linux server** (cloud 
 
 - **Remote server**: Linux only (`uname -s` preflight), x86_64 or aarch64
 - **Desktop**: Windows (x86_64 / ARM64), Linux (x86_64 / ARM64)
-- Remote data read: session files under the remote `$HOME` — `~/.claude`, `~/.gemini`, `~/.local/share/opencode`, `~/.grok`, `~/.codex` — and the `~/.cc-switch/` database; desktop local files are never uploaded or read
+- Remote data read: session files under the remote `$HOME` — `~/.claude`, `~/.gemini`, `~/.local/share/opencode`, `~/.grok`, `~/.codex`, `~/.kimi-code` — and the `~/.cc-switch/` database; desktop local files are never uploaded or read
 
 ### Differences vs Upstream
 

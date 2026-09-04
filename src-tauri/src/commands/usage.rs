@@ -256,7 +256,35 @@ pub async fn sync_session_usage(
         .lock()
         .await;
     tauri::async_runtime::spawn_blocking(move || {
-        crate::services::session_usage::sync_all_unlocked(&db)
+        let mut result = crate::services::session_usage::sync_all_unlocked(&db);
+        // Kimi 解析器只在 Core 维护一份（远程 Agent 与后台轮询共用）；
+        // 手动同步在此补跑同一入口，避免关闭自动扫描后 Kimi 永远无法导入。
+        match cc_switch_core::HeadlessState::open(crate::config::get_home_dir()).and_then(
+            |core_state| {
+                cc_switch_core::UsageService::sync_kimi_sessions(
+                    &core_state,
+                    &cc_switch_core::OperationCancellation::active(),
+                )
+            },
+        ) {
+            Ok(core_result) => {
+                let kimi_imported = core_result.imported;
+                result.merge(crate::services::session_usage::SessionSyncResult {
+                    imported: core_result.imported,
+                    skipped: core_result.skipped,
+                    files_scanned: core_result.files_scanned,
+                    suspected_duplicates: core_result.suspected_duplicates,
+                    deferred_files: core_result.deferred_files,
+                    errors: core_result.errors,
+                });
+                // sync_all_unlocked 内的通知发生在 Kimi 合并之前，这里需要补发。
+                if kimi_imported > 0 {
+                    crate::usage_events::notify_log_recorded();
+                }
+            }
+            Err(error) => result.errors.push(format!("Kimi 同步失败: {error}")),
+        }
+        result
     })
     .await
     .map_err(|error| AppError::Message(format!("会话用量同步任务失败: {error}")))

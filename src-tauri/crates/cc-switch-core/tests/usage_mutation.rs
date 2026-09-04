@@ -841,11 +841,41 @@ fn session_sync_imports_every_supported_cli_from_explicit_target_home() {
     )
     .expect("写入 Grok Build fixture");
 
+    let kimi_agent = home
+        .path()
+        .join(".kimi-code/sessions/wd_project-a_0123456789ab/kimi-session-a/agents/main");
+    std::fs::create_dir_all(&kimi_agent).expect("创建 Kimi 会话目录");
+    let kimi_wire = [
+        serde_json::json!({"type": "metadata", "protocol_version": "1.5", "created_at": 1788420554087_i64}),
+        serde_json::json!({
+            "type": "usage.record",
+            "agentId": "main",
+            "model": "kimi-code/k3-256k",
+            "usage": { "inputOther": 50, "output": 8, "inputCacheRead": 6, "inputCacheCreation": 2 },
+            "usageScope": "turn",
+            "time": 1788420606344_i64
+        }),
+        serde_json::json!({
+            "type": "usage.record",
+            "agentId": "agent-0",
+            "model": "kimi-code/k3-256k",
+            "usage": { "inputOther": 60, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 },
+            "usageScope": "turn",
+            "time": 1788420650000_i64
+        }),
+        serde_json::json!({"type": "turn.ended", "agentId": "main", "turnId": 0, "reason": "completed"}),
+    ]
+    .iter()
+    .map(serde_json::Value::to_string)
+    .collect::<Vec<_>>()
+    .join("\n");
+    std::fs::write(kimi_agent.join("wire.jsonl"), kimi_wire).expect("写入 Kimi fixture");
+
     let state = HeadlessState::open(home.path()).expect("打开目标 HOME 数据库");
     let result = UsageService::sync_sessions(&state, &OperationCancellation::active())
         .expect("同步全部远端 CLI 会话");
-    assert_eq!(result.imported, 4);
-    assert_eq!(result.files_scanned, 4);
+    assert_eq!(result.imported, 6);
+    assert_eq!(result.files_scanned, 5);
 
     let sources = state
         .with_connection(|connection| {
@@ -865,8 +895,49 @@ fn session_sync_imports_every_supported_cli_from_explicit_target_home() {
             ("claude_session".to_string(), 1),
             ("gemini_session".to_string(), 1),
             ("grok_session".to_string(), 1),
+            ("kimi_session".to_string(), 2),
             ("opencode_session".to_string(), 1),
         ]
+    );
+
+    let kimi_row = state
+        .with_connection(|connection| {
+            Ok(connection.query_row(
+                "SELECT app_type, provider_id, model, session_id, input_tokens, output_tokens,
+                         cache_read_tokens, cache_creation_tokens, input_token_semantics
+                 FROM proxy_request_logs
+                 WHERE data_source = 'kimi_session' ORDER BY created_at LIMIT 1",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, i64>(5)?,
+                        row.get::<_, i64>(6)?,
+                        row.get::<_, i64>(7)?,
+                        row.get::<_, i64>(8)?,
+                    ))
+                },
+            )?)
+        })
+        .expect("读取 Kimi 导入行");
+    // inputOther 是不含缓存的新鲜输入，语义与 Claude 一致（2 = FRESH）。
+    assert_eq!(
+        kimi_row,
+        (
+            "kimi".to_string(),
+            "_kimi_session".to_string(),
+            "kimi-code/k3-256k".to_string(),
+            Some("kimi-session-a".to_string()),
+            50,
+            8,
+            6,
+            2,
+            2
+        )
     );
 }
 

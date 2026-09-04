@@ -24,7 +24,7 @@
 - 用户手册：<https://github.com/farion1231/cc-switch/tree/main/docs/user-manual>
 - 更新日志：<https://github.com/farion1231/cc-switch/blob/main/CHANGELOG.md>
 
-本 fork **在保留上游能力的基础上**，新增了「远程服务器模式」：通过 SSH 连接远程 Linux 服务器，在远端运行临时 Agent，直接读写远端 `~/.cc-switch` 数据库，把远端 Claude/Gemini/OpenCode/Grok/Codex 的会话用量导入并展示在桌面端，并支持本地与远端之间的 Provider 同步。
+本 fork **在保留上游能力的基础上**，新增了「远程服务器模式」：通过 SSH 连接远程 Linux 服务器，在远端运行临时 Agent，直接读写远端 `~/.cc-switch` 数据库，把远端 Claude/Gemini/OpenCode/Grok/Codex/Kimi 的会话用量导入并展示在桌面端，并支持本地与远端之间的 Provider 同步。
 
 ---
 
@@ -37,7 +37,7 @@
 - **SSH 目标管理** — 从 `~/.ssh/config` 自动发现目标，或手动添加；连接测试、编辑、删除
 - **临时 Agent 随连随走** — 桌面端内嵌 musl 静态编译的 Linux Agent（x86_64 / aarch64 双架构），连接时 scp 上传到 `/tmp`，`--stdio` 运行，结束时自动删除自身（trap 清理 + 桌面端兜底清理）
 - **直接读写远端数据库** — Agent 打开远端用户自己的 `~/.cc-switch/cc-switch.db`，行为与本机完全一致（同一套 Core 导入器），不是「拉取副本」
-- **远端 Usage 同步** — 连接成功后自动同步一次，进入 Usage 页面兜底再同步一次，可随时手动同步；导入 Claude / Gemini / OpenCode / Grok / Codex 五源会话日志到远端数据库
+- **远端 Usage 同步** — 连接成功后自动同步一次，进入 Usage 页面兜底再同步一次，可随时手动同步；导入 Claude / Gemini / OpenCode / Grok / Codex / Kimi 六源会话日志到远端数据库
 - **Provider 同步** — 本地与远端之间同步 Provider，带搜索、去重跳过、失败重试的同步对话框
 - **运行时切换器** — 顶栏在「本机 / 远程目标」之间切换，实时状态指示（connecting / online / offline / reconnecting / incompatible）
 
@@ -68,7 +68,7 @@
 
 - **远端服务器**：仅 Linux（`uname -s` 预检），架构 x86_64 或 aarch64
 - **桌面端**：Windows（x86_64 / ARM64）、Linux（x86_64 / ARM64）
-- 远端被读取的数据：远端 `$HOME` 下的 `~/.claude`、`~/.gemini`、`~/.local/share/opencode`、`~/.grok`、`~/.codex` 会话文件及 `~/.cc-switch/` 数据库；桌面端本机文件不会被上传或读取
+- 远端被读取的数据：远端 `$HOME` 下的 `~/.claude`、`~/.gemini`、`~/.local/share/opencode`、`~/.grok`、`~/.codex`、`~/.kimi-code` 会话文件及 `~/.cc-switch/` 数据库；桌面端本机文件不会被上传或读取
 
 ### 与上游的差异
 

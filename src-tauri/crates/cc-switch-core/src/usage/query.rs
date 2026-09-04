@@ -793,6 +793,7 @@ fn provider_name_sql(log_alias: &str, provider_alias: &str) -> String {
          WHEN '_gemini_session' THEN 'Gemini (Session)'
          WHEN '_opencode_session' THEN 'OpenCode (Session)'
          WHEN '_grok_session' THEN 'Grok Build (Session)'
+         WHEN '_kimi_session' THEN 'Kimi (Session)'
          ELSE {log_alias}.provider_id END)"
     )
 }

@@ -130,6 +130,13 @@ impl UsageService {
         mutation::sync_sessions(state, cancellation)
     }
 
+    pub fn sync_kimi_sessions(
+        state: &HeadlessState,
+        cancellation: &OperationCancellation,
+    ) -> Result<SessionSyncResult, CoreError> {
+        mutation::sync_kimi_sessions(state, cancellation)
+    }
+
     pub fn rebuild_codex(
         state: &HeadlessState,
         cancellation: &OperationCancellation,

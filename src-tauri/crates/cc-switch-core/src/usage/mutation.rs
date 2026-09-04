@@ -174,6 +174,22 @@ pub(super) fn sync_sessions(
     Ok(result)
 }
 
+/// 桌面手动同步在 legacy 管线之外补跑 Kimi：解析器只在 Core 维护一份，
+/// 单独暴露以免桌面为单一来源重跑全部 Core 导入器。
+pub(super) fn sync_kimi_sessions(
+    state: &HeadlessState,
+    cancellation: &OperationCancellation,
+) -> Result<SessionSyncResult, CoreError> {
+    let _guard = session_sync_guard()?;
+    cancellation.check()?;
+    let result = super::session::sync_kimi(state, cancellation)?;
+    state.with_connection(|connection| {
+        backfill_missing_costs(connection)?;
+        Ok(())
+    })?;
+    Ok(result)
+}
+
 /// 锁覆盖一次同步或重建的完整生命周期，而非单次 SQLite 写入；Task 9 引入并发 worker
 /// 后也不能让普通同步插入到 Codex backup/reset/import 三阶段之间。
 fn session_sync_guard() -> Result<MutexGuard<'static, ()>, CoreError> {

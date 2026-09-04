@@ -1744,7 +1744,8 @@
       "gemini": "Gemini",
       "opencode": "OpenCode",
       "grokbuild": "Grok Build",
-      "pi": "Pi"
+      "pi": "Pi",
+      "kimi": "Kimi Code"
     },
     "rawInputLabel": "Raw",
     "sessionSync": {

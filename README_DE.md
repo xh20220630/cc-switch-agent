@@ -24,7 +24,7 @@ Dieses Repository ist ein unabhängiger Fork von [CC Switch](https://github.com/
 - Benutzerhandbuch: <https://github.com/farion1231/cc-switch/tree/main/docs/user-manual>
 - Changelog: <https://github.com/farion1231/cc-switch/blob/main/CHANGELOG.md>
 
-Dieser Fork **behält alle Upstream-Funktionen und fügt einen „Remote-Server-Modus" hinzu**: Verbinden Sie sich per SSH mit einem entfernten Linux-Server, führen Sie dort einen ephemeren Agenten aus, lesen und schreiben Sie direkt die entfernte Datenbank `~/.cc-switch`, importieren und zeigen Sie die Sitzungsnutzung von Claude/Gemini/OpenCode/Grok/Codex auf dem Remote-Server an und synchronisieren Sie Provider zwischen lokal und remote.
+Dieser Fork **behält alle Upstream-Funktionen und fügt einen „Remote-Server-Modus" hinzu**: Verbinden Sie sich per SSH mit einem entfernten Linux-Server, führen Sie dort einen ephemeren Agenten aus, lesen und schreiben Sie direkt die entfernte Datenbank `~/.cc-switch`, importieren und zeigen Sie die Sitzungsnutzung von Claude/Gemini/OpenCode/Grok/Codex/Kimi auf dem Remote-Server an und synchronisieren Sie Provider zwischen lokal und remote.
 
 ---
 
@@ -37,7 +37,7 @@ Viele Benutzer betreiben Claude Code / Codex / Gemini auf einem **entfernten Lin
 - **SSH-Zielverwaltung** — Ziele automatisch aus `~/.ssh/config` erkennen oder manuell hinzufügen; Verbindungstest, Bearbeiten, Löschen
 - **Ephemerer Agent, kommt und geht mit der Verbindung** — der Desktop bündelt einen musl-statisch gelinkten Linux-Agenten (x86_64 / aarch64). Beim Verbinden wird er per scp nach `/tmp` hochgeladen, mit `--stdio` ausgeführt und löscht sich beim Beenden selbst (trap-Cleanup + Fallback vom Desktop)
 - **Remote-DB direkt lesen/schreiben** — der Agent öffnet die eigene Datenbank `~/.cc-switch/cc-switch.db` des Remote-Benutzers und verhält sich exakt wie lokal (derselbe Core-Importer) — keine „gezogene Kopie"
-- **Remote-Nutzungssynchronisierung** — automatische Synchronisierung einmal bei erfolgreicher Verbindung, erneut beim Öffnen der Usage-Seite, plus manuelle Synchronisierung jederzeit; importiert Sitzungsprotokolle aus allen fünf Quellen (Claude / Gemini / OpenCode / Grok / Codex) in die entfernte Datenbank
+- **Remote-Nutzungssynchronisierung** — automatische Synchronisierung einmal bei erfolgreicher Verbindung, erneut beim Öffnen der Usage-Seite, plus manuelle Synchronisierung jederzeit; importiert Sitzungsprotokolle aus allen sechs Quellen (Claude / Gemini / OpenCode / Grok / Codex / Kimi) in die entfernte Datenbank
 - **Provider-Synchronisierung** — Provider zwischen lokal und remote synchronisieren, über einen Dialog mit Suche, Duplikat-Überspringen und Retry
 - **Runtime-Umschalter** — Umschalten zwischen „lokal / Remote-Ziel" in der oberen Leiste, mit Live-Status (connecting / online / offline / reconnecting / incompatible)
 
@@ -68,7 +68,7 @@ Viele Benutzer betreiben Claude Code / Codex / Gemini auf einem **entfernten Lin
 
 - **Remote-Server**: nur Linux (`uname -s` Preflight), x86_64 oder aarch64
 - **Desktop**: Windows (x86_64 / ARM64), Linux (x86_64 / ARM64)
-- Gelesene Remote-Daten: Sitzungsdateien unter dem Remote-`$HOME` — `~/.claude`, `~/.gemini`, `~/.local/share/opencode`, `~/.grok`, `~/.codex` — sowie die Datenbank `~/.cc-switch/`; lokale Dateien des Desktops werden weder hochgeladen noch gelesen
+- Gelesene Remote-Daten: Sitzungsdateien unter dem Remote-`$HOME` — `~/.claude`, `~/.gemini`, `~/.local/share/opencode`, `~/.grok`, `~/.codex`, `~/.kimi-code` — sowie die Datenbank `~/.cc-switch/`; lokale Dateien des Desktops werden weder hochgeladen noch gelesen
 
 ### Unterschiede zu Upstream
 
