@@ -88,7 +88,9 @@ CREATE TABLE session_log_sync (
     file_path TEXT PRIMARY KEY,
     last_modified INTEGER NOT NULL,
     last_line_offset INTEGER NOT NULL DEFAULT 0,
-    last_synced_at INTEGER NOT NULL
+    last_synced_at INTEGER NOT NULL,
+    last_byte_offset INTEGER,
+    last_tail_fingerprint INTEGER
 );
 "#;
 

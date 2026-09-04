@@ -5,7 +5,7 @@ use std::time::Duration;
 use rusqlite::Connection;
 
 /// 与桌面数据库 `src/database/mod.rs` 保持一致；Agent 不再维护独立版本号。
-pub const DESKTOP_SCHEMA_VERSION: i32 = 17;
+pub const DESKTOP_SCHEMA_VERSION: i32 = 18;
 
 const CANONICAL_REQUIRED_SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS providers (
@@ -102,7 +102,9 @@ CREATE TABLE IF NOT EXISTS session_log_sync (
     file_path TEXT PRIMARY KEY,
     last_modified INTEGER NOT NULL,
     last_line_offset INTEGER NOT NULL DEFAULT 0,
-    last_synced_at INTEGER NOT NULL
+    last_synced_at INTEGER NOT NULL,
+    last_byte_offset INTEGER,
+    last_tail_fingerprint INTEGER
 );
 CREATE TABLE IF NOT EXISTS session_usage_dedup (
     data_source TEXT NOT NULL,
@@ -209,6 +211,8 @@ const REQUIRED_COLUMNS: &[(&str, &[&str])] = &[
             "last_modified",
             "last_line_offset",
             "last_synced_at",
+            "last_byte_offset",
+            "last_tail_fingerprint",
         ],
     ),
 ];
@@ -221,7 +225,7 @@ pub(crate) fn configure_connection(connection: &Connection) -> Result<(), rusqli
     Ok(())
 }
 
-/// 全新远端没有数据库时只创建本阶段使用的规范表，列名和约束与桌面 v16 一致。
+/// 全新远端没有数据库时只创建本阶段使用的规范表，列名和约束与桌面 v18 一致。
 /// 已有数据库绝不能经过此入口，防止 `CREATE TABLE IF NOT EXISTS` 掩盖缺列或旧私有 schema。
 pub(crate) fn initialize_new_database(connection: &Connection) -> Result<(), SchemaError> {
     connection.execute_batch(CANONICAL_REQUIRED_SCHEMA)?;
@@ -262,6 +266,7 @@ pub fn migrate_supported_database(
                 14 => migrate_v14_to_v15(connection)?,
                 15 => reset_codex_usage_on_connection(connection, codex_dir)?,
                 16 => migrate_v16_to_v17(connection)?,
+                17 => migrate_v17_to_v18(connection)?,
                 _ => {
                     return Err(SchemaError::Incompatible {
                         detected: version,
@@ -546,6 +551,21 @@ fn migrate_v16_to_v17(connection: &Connection) -> Result<(), SchemaError> {
          CREATE INDEX IF NOT EXISTS idx_session_usage_dedup_semantic
          ON session_usage_dedup(data_source, semantic_id, has_entry_id);",
     )?;
+    Ok(())
+}
+
+/// v17 -> v18：session_log_sync 增加字节游标列（桌面端 Claude 增量字节扫描用）。
+/// 缺表的库（异常/测试夹具）跳过：CANONICAL_REQUIRED_SCHEMA 会以含列的新 DDL 建表。
+fn migrate_v17_to_v18(connection: &Connection) -> Result<(), SchemaError> {
+    if table_exists(connection, "session_log_sync")? {
+        add_column_if_missing(connection, "session_log_sync", "last_byte_offset", "INTEGER")?;
+        add_column_if_missing(
+            connection,
+            "session_log_sync",
+            "last_tail_fingerprint",
+            "INTEGER",
+        )?;
+    }
     Ok(())
 }
 
