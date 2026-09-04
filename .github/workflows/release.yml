@@ -427,7 +427,10 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           name: CC Switch ${{ github.ref_name }}
-          prerelease: true
+          # 只有带预发布后缀的 tag(如 v0.1.0-beta)才是 prerelease；正式 tag 必须为正式
+          # release，否则 GitHub 不产生 latest 指针，updater 端点 …/latest/download/
+          # latest.json 返回 404，客户端检查更新永远失败。
+          prerelease: ${{ contains(github.ref_name, '-') }}
           body: |
             ## CC Switch ${{ github.ref_name }}
 
