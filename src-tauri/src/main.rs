@@ -2,6 +2,19 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
+    // SSH_ASKPASS 辅助模式：远程密码认证把本可执行文件设为 SSH_ASKPASS 程序
+    // (见 remote::ssh::AskPassGuard)，ssh 会拉起一个短命进程，由这里读取
+    // CC_SWITCH_ASKPASS_PASSWORD_FILE 指向的密码文件并写到 stdout。
+    // 必须在任何运行时与单实例初始化之前处理并退出——否则短命进程会被
+    // 单实例插件当作"第二次启动"吞掉(密码认证失败)，或错误启动完整应用。
+    if let Ok(password_file) = std::env::var("CC_SWITCH_ASKPASS_PASSWORD_FILE") {
+        if let Ok(password) = std::fs::read(&password_file) {
+            use std::io::Write;
+            let _ = std::io::stdout().write_all(&password);
+        }
+        std::process::exit(0);
+    }
+
     // 在 Linux 上设置 WebKit 环境变量以解决 DMA-BUF 渲染问题
     // 某些 Linux 系统（如 Debian 13.2、Nvidia GPU）上 WebKitGTK 的 DMA-BUF 渲染器可能导致白屏/黑屏
     // 参考: https://github.com/tauri-apps/tauri/issues/9394

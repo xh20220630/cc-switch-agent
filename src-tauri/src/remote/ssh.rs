@@ -16,6 +16,18 @@ use super::ephemeral_deploy::{
 use super::models::{RemoteTargetConfig, RemoteTargetValidationError};
 use super::protocol::ProtocolError;
 
+/// 安装版是 Windows GUI 子系统进程(无控制台)，spawn 任何控制台程序(ssh/scp/
+/// ssh-keyscan)都会闪现一个 conhost/Windows Terminal 窗口。统一给外部命令设置
+/// CREATE_NO_WINDOW；非 Windows 平台无此概念，为空操作。
+fn hide_console_window(#[allow(unused_variables)] command: &mut Command) {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct RemotePlatform {
@@ -108,12 +120,17 @@ pub fn build_ssh_args(
     Ok(args)
 }
 
-/// SSH_ASKPASS 辅助：把密码写入临时目录，生成的 .cmd 通过 `type` 读取并输出，
-/// 避免 cmd 对 `& |>^%` 等字符的二次解释。OpenSSH 8.4+ 支持 SSH_ASKPASS_REQUIRE=force，
-/// 无 TTY 时会强制调用 askpass 完成密码认证。
+/// SSH_ASKPASS 辅助：把密码写入临时目录。优先把 SSH_ASKPASS 指向当前可执行文件
+/// 自身（安装版为 GUI 子系统，拉起时不会创建控制台窗口），由 main 最早期的
+/// askpass 分支读取 CC_SWITCH_ASKPASS_PASSWORD_FILE 指向的文件并输出到 stdout；
+/// 可执行路径含空格时退回旧 .cmd 方案（ssh 对 SSH_ASKPASS 的空格拆分不可靠，
+/// 宁可保留弹窗也要保证认证可用）。OpenSSH 8.4+ 的 SSH_ASKPASS_REQUIRE=force
+/// 会在无 TTY 时强制调用 askpass 完成密码认证。
 struct AskPassGuard {
     _dir: tempfile::TempDir,
-    script_path: std::path::PathBuf,
+    askpass_target: OsString,
+    /// 仅 exe 辅助模式使用：密码文件路径经环境变量传给短命 askpass 进程。
+    password_file: Option<std::path::PathBuf>,
 }
 
 impl AskPassGuard {
@@ -125,22 +142,40 @@ impl AskPassGuard {
         let password_file = dir.path().join("password.txt");
         std::fs::write(&password_file, password.as_bytes())
             .map_err(RemoteSshError::AskPassStaging)?;
-        let script_path = dir.path().join("askpass.cmd");
-        std::fs::write(
-            &script_path,
-            format!("@echo off\r\ntype \"{}\"\r\n", password_file.display()).as_bytes(),
-        )
-        .map_err(RemoteSshError::AskPassStaging)?;
-        Ok(Self {
-            _dir: dir,
-            script_path,
-        })
+        // ssh 对 SSH_ASKPASS 按空格拆分命令行，含空格的 exe 路径无法可靠执行。
+        let exe = std::env::current_exe()
+            .ok()
+            .filter(|path| !path.as_os_str().to_string_lossy().contains(' '));
+        match exe {
+            Some(exe) => Ok(Self {
+                _dir: dir,
+                askpass_target: exe.into_os_string(),
+                password_file: Some(password_file),
+            }),
+            None => {
+                // .cmd 通过 `type` 读取并输出，避免 cmd 对 `& |>^%` 等字符的二次解释。
+                let script_path = dir.path().join("askpass.cmd");
+                std::fs::write(
+                    &script_path,
+                    format!("@echo off\r\ntype \"{}\"\r\n", password_file.display()).as_bytes(),
+                )
+                .map_err(RemoteSshError::AskPassStaging)?;
+                Ok(Self {
+                    _dir: dir,
+                    askpass_target: script_path.into_os_string(),
+                    password_file: None,
+                })
+            }
+        }
     }
 
     fn apply(&self, command: &mut Command) {
         command
-            .env("SSH_ASKPASS", &self.script_path)
+            .env("SSH_ASKPASS", &self.askpass_target)
             .env("SSH_ASKPASS_REQUIRE", "force");
+        if let Some(password_file) = &self.password_file {
+            command.env("CC_SWITCH_ASKPASS_PASSWORD_FILE", password_file);
+        }
     }
 }
 
@@ -148,6 +183,7 @@ impl AskPassGuard {
 fn scan_host_keys(target: &RemoteTargetConfig) -> Result<(String, Vec<String>), RemoteSshError> {
     let target = target.clone().normalize()?;
     let mut scan = Command::new("ssh-keyscan");
+    hide_console_window(&mut scan);
     if let Some(port) = target.port {
         scan.arg("-p").arg(port.to_string());
     }
@@ -253,6 +289,7 @@ impl OpenSshSession {
         local_agent.flush().map_err(RemoteSshError::Staging)?;
         let scp_args = build_scp_args(&target, local_agent.path(), &spec.remote_path)?;
         let mut upload_command = Command::new("scp");
+        hide_console_window(&mut upload_command);
         let upload_askpass = prepare_password_auth(&target)?;
         if let Some(askpass) = upload_askpass.as_ref() {
             askpass.apply(&mut upload_command);
@@ -269,6 +306,7 @@ impl OpenSshSession {
 
         let args = build_ssh_args(&target, &[build_launch_command(&spec)])?;
         let mut command = Command::new("ssh");
+        hide_console_window(&mut command);
         let askpass = prepare_password_auth(&target)?;
         if let Some(askpass) = askpass.as_ref() {
             askpass.apply(&mut command);
@@ -340,6 +378,7 @@ impl Drop for OpenSshSession {
 pub fn preflight(target: &RemoteTargetConfig) -> Result<RemotePlatform, RemoteSshError> {
     let args = build_ssh_args(target, &[build_preflight_command()])?;
     let mut command = Command::new("ssh");
+    hide_console_window(&mut command);
     let askpass = prepare_password_auth(target)?;
     if let Some(askpass) = askpass.as_ref() {
         askpass.apply(&mut command);
@@ -411,6 +450,7 @@ impl CleanupScheduler for OpenSshCleanupScheduler {
         // Drop 不能长期阻塞 UI；独立 ssh 进程负责兜底删除，远端 launch trap 是第一道清理。
         std::thread::spawn(move || {
             let mut command = Command::new("ssh");
+            hide_console_window(&mut command);
             let askpass = match prepare_password_auth(&target) {
                 Ok(askpass) => askpass,
                 Err(error) => {
@@ -538,5 +578,54 @@ impl RemoteSshError {
             Self::Client(error) => error.code(),
             _ => "REMOTE_CONNECTION_ERROR",
         }
+    }
+}
+
+#[cfg(test)]
+mod askpass_tests {
+    use super::*;
+
+    /// 当前 exe 路径无空格时必须走 exe 辅助模式：SSH_ASKPASS 指向 GUI 子系统的
+    /// 自身（不弹控制台窗口），密码文件经环境变量传递，main 最早期分支输出。
+    #[test]
+    fn askpass_prefers_current_exe_with_password_file_env() {
+        if std::env::current_exe()
+            .map(|exe| exe.as_os_str().to_string_lossy().contains(' '))
+            .unwrap_or(true)
+        {
+            // CI  runner 路径含空格时走 .cmd 回退，本用例不适用。
+            return;
+        }
+        let guard = AskPassGuard::create("s3cr3t &<>^%").expect("创建 askpass guard");
+        assert_eq!(
+            guard.askpass_target,
+            std::env::current_exe().unwrap().into_os_string()
+        );
+        let password_file = guard
+            .password_file
+            .as_ref()
+            .expect("exe 模式必须携带密码文件路径");
+        assert_eq!(
+            std::fs::read_to_string(password_file).expect("读取密码文件"),
+            "s3cr3t &<>^%"
+        );
+
+        let mut command = Command::new("ssh");
+        guard.apply(&mut command);
+        let envs: Vec<(_, _)> = command.get_envs().collect();
+        let env = |key: &str| {
+            envs.iter()
+                .find(|(name, _)| *name == OsString::from(key))
+                .and_then(|(_, value)| value.map(|value| value.to_os_string()))
+        };
+        assert_eq!(env("SSH_ASKPASS"), Some(guard.askpass_target.clone()));
+        assert_eq!(
+            env("SSH_ASKPASS_REQUIRE"),
+            Some(OsString::from("force"))
+        );
+        assert_eq!(
+            env("CC_SWITCH_ASKPASS_PASSWORD_FILE"),
+            Some(password_file.as_os_str().to_os_string())
+        );
     }
 }
