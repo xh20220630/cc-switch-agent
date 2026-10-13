@@ -1,11 +1,28 @@
 //! 桌面 Usage SQL 语义由 cc-switch-core 统一维护；本模块仅保留既有 crate 内导入路径。
 
-#[cfg(test)]
+// 上游的生产查询也使用 legacy 语义常量，不能再只在测试构建中导出。
 pub(crate) use cc_switch_core::INPUT_TOKEN_SEMANTICS_LEGACY;
 pub(crate) use cc_switch_core::{
     fresh_input_sql, is_cache_inclusive_app, INPUT_TOKEN_SEMANTICS_FRESH,
     INPUT_TOKEN_SEMANTICS_TOTAL,
 };
+
+/// 单行的「真实消耗 Tokens」：新增输入 + 输出 + 缓存写入 + 缓存命中。
+///
+/// 与 `usage_stats::derive_real_total_and_hit_rate`（指标卡 / 趋势图）同口径，
+/// 供应商、模型等分组统计的 `total_tokens` 都用它，保证各行之和等于顶部总数。
+pub fn real_total_tokens_sql(alias: &str) -> String {
+    let prefix = if alias.is_empty() {
+        String::new()
+    } else {
+        format!("{alias}.")
+    };
+    let fresh_input = fresh_input_sql(alias);
+    format!(
+        "(({fresh_input}) + {prefix}output_tokens \
+          + {prefix}cache_creation_tokens + {prefix}cache_read_tokens)"
+    )
+}
 
 #[cfg(test)]
 mod tests {

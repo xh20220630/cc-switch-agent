@@ -55,9 +55,13 @@ fn provider_capabilities() -> [CommandCapability; 7] {
     ]
 }
 
-fn usage_capabilities() -> [CommandCapability; 20] {
+fn usage_capabilities() -> [CommandCapability; 23] {
     [
         capability("usage.summary", true, true, 30_000),
+        // 上游用量页的新只读接口必须同步开放，远程模式不允许回退到本机。
+        capability("usage.session_summary", true, true, 30_000),
+        capability("usage.first_date", true, true, 30_000),
+        capability("usage.session_last_sync", true, true, 30_000),
         capability("usage.summary_by_app", true, true, 30_000),
         capability("usage.trends", true, true, 30_000),
         capability("usage.provider_stats", true, true, 30_000),

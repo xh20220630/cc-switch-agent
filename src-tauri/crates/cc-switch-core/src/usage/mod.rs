@@ -127,7 +127,9 @@ impl UsageService {
         state: &HeadlessState,
         cancellation: &OperationCancellation,
     ) -> Result<SessionSyncResult, CoreError> {
-        mutation::sync_sessions(state, cancellation)
+        let result = mutation::sync_sessions(state, cancellation)?;
+        state.record_session_sync();
+        Ok(result)
     }
 
     pub fn sync_kimi_sessions(
@@ -156,6 +158,22 @@ impl UsageService {
         scope: UsageScope,
     ) -> Result<Vec<UsageSummaryByApp>, CoreError> {
         query::summary_by_app(source, &scope)
+    }
+
+    /// 会话阅读页与热力图沿用目标数据库的统计口径，不读取桌面宿主机数据。
+    pub fn session_summary(
+        source: &impl UsageQueryConnection,
+        app_type: &str,
+        session_id: &str,
+    ) -> Result<UsageSummary, CoreError> {
+        query::session_summary(source, app_type, session_id)
+    }
+
+    pub fn first_date(
+        source: &impl UsageQueryConnection,
+        scope: UsageScope,
+    ) -> Result<Option<String>, CoreError> {
+        query::first_date(source, &scope)
     }
 
     pub fn trends(
@@ -233,6 +251,21 @@ pub(crate) fn dispatch(
     cancellation: &OperationCancellation,
 ) -> Result<Value, CommandError> {
     match command {
+        "usage.session_summary" => {
+            let args: SessionArgs = serde_json::from_value(args)
+                .map_err(|error| CommandError::InvalidArgument(error.to_string()))?;
+            serialize(UsageService::session_summary(
+                state,
+                &args.app_type,
+                &args.session_id,
+            )?)
+        }
+        "usage.first_date" => {
+            let scope = serde_json::from_value::<UsageScope>(args)
+                .map_err(|error| CommandError::InvalidArgument(error.to_string()))?;
+            serialize(UsageService::first_date(state, scope)?)
+        }
+        "usage.session_last_sync" => serialize(state.last_session_sync_at()),
         "usage.summary" => {
             let scope = serde_json::from_value::<UsageScope>(args)
                 .map_err(|error| CommandError::InvalidArgument(error.to_string()))?;
@@ -352,6 +385,13 @@ struct LogsArgs {
 #[serde(rename_all = "camelCase")]
 struct RequestArgs {
     request_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionArgs {
+    app_type: String,
+    session_id: String,
 }
 
 #[derive(Debug, Deserialize)]

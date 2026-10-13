@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -19,6 +20,8 @@ pub struct HeadlessState {
     connection: Mutex<Connection>,
     home: PathBuf,
     platform: TargetPlatform,
+    /// 最近一次会话扫描完成时间属于此目标状态；0 表示本次 Agent 启动后尚未扫描。
+    last_session_sync_at: AtomicI64,
 }
 
 impl HeadlessState {
@@ -59,6 +62,7 @@ impl HeadlessState {
             connection: Mutex::new(connection),
             home,
             platform,
+            last_session_sync_at: AtomicI64::new(0),
         })
     }
 
@@ -79,6 +83,7 @@ impl HeadlessState {
             connection: Mutex::new(connection),
             home: home.as_ref().to_path_buf(),
             platform,
+            last_session_sync_at: AtomicI64::new(0),
         })
     }
 
@@ -104,6 +109,17 @@ impl HeadlessState {
     /// 返回建连时固定的目标平台，避免 live writer 错用桌面宿主机的编译平台。
     pub fn platform(&self) -> TargetPlatform {
         self.platform
+    }
+
+    /// 扫描成功返回后记录完成时间，和桌面端「本次启动」语义一致，避免持久化旧进程状态。
+    pub(crate) fn record_session_sync(&self) {
+        self.last_session_sync_at
+            .fetch_max(chrono::Utc::now().timestamp_millis(), Ordering::Relaxed);
+    }
+
+    pub(crate) fn last_session_sync_at(&self) -> Option<i64> {
+        let value = self.last_session_sync_at.load(Ordering::Relaxed);
+        (value > 0).then_some(value)
     }
 
     /// Provider/Usage 写事务仍由各领域服务管理；仅在 crate 内暴露锁守卫。

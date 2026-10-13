@@ -82,6 +82,51 @@ pub(crate) fn summary_by_app(
     })
 }
 
+/// 会话 ID 来自客户端日志，代理自行推断的 ID 不参与这张汇总，避免双计。
+/// 日汇总已丢失会话维度，因此只统计尚未归档的明细，和上游阅读页保持一致。
+pub(crate) fn session_summary(
+    source: &impl UsageQueryConnection,
+    app_type: &str,
+    session_id: &str,
+) -> Result<UsageSummary, CoreError> {
+    source.with_usage_connection(|connection| {
+        let fresh = fresh_input_sql("l");
+        let app = folded_app_type("l.app_type");
+        let sql = format!(
+            "SELECT COUNT(*), COALESCE(SUM(CAST(l.total_cost_usd AS REAL)), 0),
+                    COALESCE(SUM({fresh}), 0), COALESCE(SUM(l.output_tokens), 0),
+                    COALESCE(SUM(l.cache_creation_tokens), 0), COALESCE(SUM(l.cache_read_tokens), 0),
+                    COALESCE(SUM(CASE WHEN l.status_code >= 200 AND l.status_code < 300 THEN 1 ELSE 0 END), 0)
+             FROM proxy_request_logs l
+             WHERE l.session_id = ?1 AND {app} = ?2 AND COALESCE(l.data_source, 'proxy') <> 'proxy'"
+        );
+        Ok(connection.query_row(&sql, [session_id, app_type], summary_from_row)?)
+    })
+}
+
+/// 热力图的起点同时考虑明细与历史日汇总；ISO 日期可直接比较，日期按目标机时区生成。
+pub(crate) fn first_date(
+    source: &impl UsageQueryConnection,
+    scope: &UsageScope,
+) -> Result<Option<String>, CoreError> {
+    source.with_usage_connection(|connection| {
+        let detail = QueryFilter::from_scope(scope, "l");
+        let rollup = RollupFilter::from_scope(scope, "r", true);
+        let sql = format!(
+            "SELECT MIN(day) FROM (
+                SELECT MIN(date(l.created_at, 'unixepoch', 'localtime')) AS day
+                FROM proxy_request_logs l LEFT JOIN providers p ON l.provider_id = p.id AND l.app_type = p.app_type {}
+                UNION ALL
+                SELECT MIN(r.date) AS day FROM usage_daily_rollups r
+                LEFT JOIN providers p ON r.provider_id = p.id AND r.app_type = p.app_type {}
+             )", detail.where_clause(), rollup.where_clause()
+        );
+        let mut params = detail.params;
+        params.extend(rollup.params);
+        Ok(connection.query_row(&sql, params_from_iter(params.iter()), |row| row.get(0))?)
+    })
+}
+
 pub(crate) fn trends(
     source: &impl UsageQueryConnection,
     scope: &UsageScope,

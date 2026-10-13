@@ -5,7 +5,7 @@ use std::time::Duration;
 use rusqlite::Connection;
 
 /// 与桌面数据库 `src/database/mod.rs` 保持一致；Agent 不再维护独立版本号。
-pub const DESKTOP_SCHEMA_VERSION: i32 = 18;
+pub const DESKTOP_SCHEMA_VERSION: i32 = 20;
 
 const CANONICAL_REQUIRED_SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS providers (
@@ -225,7 +225,7 @@ pub(crate) fn configure_connection(connection: &Connection) -> Result<(), rusqli
     Ok(())
 }
 
-/// 全新远端没有数据库时只创建本阶段使用的规范表，列名和约束与桌面 v18 一致。
+/// 全新远端没有数据库时只创建本阶段使用的规范表，列名和约束与桌面当前版本一致。
 /// 已有数据库绝不能经过此入口，防止 `CREATE TABLE IF NOT EXISTS` 掩盖缺列或旧私有 schema。
 pub(crate) fn initialize_new_database(connection: &Connection) -> Result<(), SchemaError> {
     connection.execute_batch(CANONICAL_REQUIRED_SCHEMA)?;
@@ -267,6 +267,29 @@ pub fn migrate_supported_database(
                 15 => reset_codex_usage_on_connection(connection, codex_dir)?,
                 16 => migrate_v16_to_v17(connection)?,
                 17 => migrate_v17_to_v18(connection)?,
+                // 这些管理表不是 Agent 的必需表；存在时升级列，缺表时保持最小新库结构。
+                18 => {
+                    for table in ["mcp_servers", "skills"] {
+                        if table_exists(connection, table)? {
+                            add_column_if_missing(
+                                connection,
+                                table,
+                                "enabled_mcode",
+                                "BOOLEAN NOT NULL DEFAULT 0",
+                            )?;
+                        }
+                    }
+                }
+                19 => {
+                    if table_exists(connection, "mcp_servers")? {
+                        add_column_if_missing(
+                            connection,
+                            "mcp_servers",
+                            "enabled_pi",
+                            "BOOLEAN NOT NULL DEFAULT 0",
+                        )?;
+                    }
+                }
                 _ => {
                     return Err(SchemaError::Incompatible {
                         detected: version,
@@ -558,7 +581,12 @@ fn migrate_v16_to_v17(connection: &Connection) -> Result<(), SchemaError> {
 /// 缺表的库（异常/测试夹具）跳过：CANONICAL_REQUIRED_SCHEMA 会以含列的新 DDL 建表。
 fn migrate_v17_to_v18(connection: &Connection) -> Result<(), SchemaError> {
     if table_exists(connection, "session_log_sync")? {
-        add_column_if_missing(connection, "session_log_sync", "last_byte_offset", "INTEGER")?;
+        add_column_if_missing(
+            connection,
+            "session_log_sync",
+            "last_byte_offset",
+            "INTEGER",
+        )?;
         add_column_if_missing(
             connection,
             "session_log_sync",

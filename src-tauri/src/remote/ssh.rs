@@ -619,10 +619,7 @@ mod askpass_tests {
                 .and_then(|(_, value)| value.map(|value| value.to_os_string()))
         };
         assert_eq!(env("SSH_ASKPASS"), Some(guard.askpass_target.clone()));
-        assert_eq!(
-            env("SSH_ASKPASS_REQUIRE"),
-            Some(OsString::from("force"))
-        );
+        assert_eq!(env("SSH_ASKPASS_REQUIRE"), Some(OsString::from("force")));
         assert_eq!(
             env("CC_SWITCH_ASKPASS_PASSWORD_FILE"),
             Some(password_file.as_os_str().to_os_string())

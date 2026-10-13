@@ -74,6 +74,20 @@ export const usageApi = {
     );
   },
 
+  getSessionUsageSummary: async (
+    appType: string,
+    sessionId: string,
+  ): Promise<UsageSummary> => {
+    // 新增的会话页查询也走目标路由，不能误读本机同名会话。
+    return appInvoke(
+      "get_session_usage_summary",
+      { appType, sessionId },
+      {
+        remoteCommand: "usage.session_summary",
+      },
+    );
+  },
+
   getUsageSummaryByApp: async (
     startDate?: number,
     endDate?: number,
@@ -98,6 +112,23 @@ export const usageApi = {
       "get_usage_trends",
       { startDate, endDate, appType, providerName, model },
       { remoteCommand: "usage.trends" },
+    );
+  },
+
+  /** 最早有用量记录的本地日期 `YYYY-MM-DD`，没有记录时为 null */
+  getUsageFirstDate: async (
+    appType?: string,
+    providerName?: string,
+    model?: string,
+  ): Promise<string | null> => {
+    return appInvoke(
+      "get_usage_first_date",
+      {
+        appType,
+        providerName,
+        model,
+      },
+      { remoteCommand: "usage.first_date" },
     );
   },
 
@@ -235,6 +266,13 @@ export const usageApi = {
   syncSessionUsage: async (): Promise<SessionSyncResult> => {
     return appInvoke("sync_session_usage", undefined, {
       remoteCommand: "usage.session_sync",
+    });
+  },
+
+  /** 会话日志扫描（后台定时或手动同步）最近一次完成的时间（毫秒）；本次启动后还没扫过时为 null */
+  getSessionUsageLastSync: async (): Promise<number | null> => {
+    return appInvoke("get_session_usage_last_sync", undefined, {
+      remoteCommand: "usage.session_last_sync",
     });
   },
 

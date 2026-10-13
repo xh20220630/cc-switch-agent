@@ -87,7 +87,12 @@ describe("useUpdateProviderMutation", () => {
       await result.current.mutateAsync({ provider });
     });
 
-    expect(apiMocks.update).toHaveBeenCalledWith(provider, "codex", undefined);
+    expect(apiMocks.update).toHaveBeenCalledWith(
+      provider,
+      "codex",
+      undefined,
+      undefined,
+    );
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: providerKeys.byApp("codex"),
     });
@@ -117,6 +122,7 @@ describe("useUpdateProviderMutation", () => {
       provider,
       "openclaw",
       "provider-old",
+      undefined,
     );
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: usageKeys.script("provider-new", "openclaw"),

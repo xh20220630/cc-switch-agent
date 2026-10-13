@@ -7,13 +7,7 @@ import {
   sessionsApi,
   type AppId,
 } from "@/lib/api";
-import type {
-  Provider,
-  Settings,
-  UsageResult,
-  SessionMeta,
-  SessionMessage,
-} from "@/types";
+import type { Provider, Settings, UsageResult, SessionMeta } from "@/types";
 import { usageKeys } from "@/lib/query/usage";
 import { extractErrorMessage } from "@/utils/errorUtils";
 import {
@@ -62,6 +56,41 @@ export interface UseProvidersQueryOptions {
   isProxyRunning?: boolean; // 代理服务是否运行中
 }
 
+/**
+ * 供应商列表的查询键与读取函数。App 启动后用它把其他应用的列表预取进缓存，
+ * 第一次切过去时直接有数据，不用先画骨架。
+ */
+export const providersQueryOptions = (
+  appId: AppId,
+  scope: RuntimeQueryScope = runtimeQueryScope(),
+) => ({
+  // 预取与页面订阅必须共用含主机的键，否则预取结果会跨本机/远端复用。
+  queryKey: providerKeys.byApp(appId, scope),
+  // 列表很小：没人订阅时也一直留在缓存里，过了默认的 5 分钟再切过去也不画骨架
+  gcTime: Infinity,
+  queryFn: async (): Promise<ProvidersQueryData> => {
+    let providers: Record<string, Provider> = {};
+    let currentProviderId = "";
+
+    try {
+      providers = await providersApi.getAll(appId);
+    } catch (error) {
+      console.error("获取供应商列表失败:", error);
+    }
+
+    try {
+      currentProviderId = await providersApi.getCurrent(appId);
+    } catch (error) {
+      console.error("获取当前供应商失败:", error);
+    }
+
+    return {
+      providers: sortProviders(providers),
+      currentProviderId,
+    };
+  },
+});
+
 export const useProvidersQuery = (
   appId: AppId,
   options?: UseProvidersQueryOptions,
@@ -69,42 +98,12 @@ export const useProvidersQuery = (
   const { isProxyRunning = false } = options || {};
   const scope = useRuntimeQueryScope();
 
+  // 不设 keepPreviousData：切应用或主机时，占位数据会闪出上一份供应商列表。
   return useQuery({
-    queryKey: providerKeys.byApp(appId, scope),
-    // 同一主机切应用时保留旧列表以减少闪烁；runtime scope 一旦变化则必须立即清空，
-    // 绝不能把本机 Provider 当作远端加载中的占位数据展示。
-    placeholderData: (previousData, previousQuery) => {
-      const currentPrefix = providerKeys.all(scope);
-      const previousKey = previousQuery?.queryKey;
-      const sameRuntime = currentPrefix.every(
-        (part, index) => previousKey?.[index] === part,
-      );
-      return sameRuntime ? previousData : undefined;
-    },
+    ...providersQueryOptions(appId, scope),
     // 当代理服务运行时，每 10 秒刷新一次供应商列表
     // 这样可以自动反映后端熔断器自动禁用代理目标的变更
     refetchInterval: isProxyRunning ? 10000 : false,
-    queryFn: async () => {
-      let providers: Record<string, Provider> = {};
-      let currentProviderId = "";
-
-      try {
-        providers = await providersApi.getAll(appId);
-      } catch (error) {
-        console.error("获取供应商列表失败:", error);
-      }
-
-      try {
-        currentProviderId = await providersApi.getCurrent(appId);
-      } catch (error) {
-        console.error("获取当前供应商失败:", error);
-      }
-
-      return {
-        providers: sortProviders(providers),
-        currentProviderId,
-      };
-    },
   });
 };
 
@@ -341,14 +340,5 @@ export const useSessionsQuery = () => {
   });
 };
 
-export const useSessionMessagesQuery = (
-  providerId?: string,
-  sourcePath?: string,
-) => {
-  return useQuery<SessionMessage[]>({
-    queryKey: ["sessionMessages", providerId, sourcePath],
-    queryFn: async () => sessionsApi.getMessages(providerId!, sourcePath!),
-    enabled: Boolean(providerId && sourcePath),
-    staleTime: 30 * 1000,
-  });
-};
+// 会话消息查询已迁到 ./sessions（阅读页数据层），这里保留转发给旧调用方
+export { useSessionMessagesQuery } from "./sessions";

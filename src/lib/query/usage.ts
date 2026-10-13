@@ -12,9 +12,21 @@ import type {
   UsageScopeFilters,
 } from "@/types/usage";
 
+/** 时间/筛选变化保留当前主机的旧结果；换主机时清空占位数据，避免短暂展示其他环境用量。 */
+function scopedUsagePlaceholder<T>(
+  previousData: T | undefined,
+  previousQuery?: { queryKey: readonly unknown[] },
+): T | undefined {
+  const prefix = usageKeys.all();
+  return prefix.every((part, index) => previousQuery?.queryKey[index] === part)
+    ? previousData
+    : undefined;
+}
+
 const DEFAULT_REFETCH_INTERVAL_MS = 30000;
 
 type UsageQueryOptions = {
+  enabled?: boolean;
   refetchInterval?: number | false;
   refetchIntervalInBackground?: boolean;
 };
@@ -100,6 +112,17 @@ export const usageKeys = {
       filters?.providerName ?? null,
       filters?.model ?? null,
     ] as const,
+  firstDate: (
+    filters?: UsageScopeFilters,
+    scope: RuntimeQueryScope = runtimeQueryScope(),
+  ) =>
+    [
+      ...usageKeys.all(scope),
+      "first-date",
+      filters?.appType ?? null,
+      filters?.providerName ?? null,
+      filters?.model ?? null,
+    ] as const,
   providerStats: (
     preset: UsageRangeSelection["preset"],
     customStartDate: number | undefined,
@@ -174,6 +197,12 @@ export const usageKeys = {
     appType: string,
     scope: RuntimeQueryScope = runtimeQueryScope(),
   ) => [...usageKeys.all(scope), "script", providerId, appType] as const,
+  // 会话汇总也按主机隔离，阅读页不能复用另一台主机的同名会话。
+  session: (
+    appType: string,
+    sessionId: string,
+    scope: RuntimeQueryScope = runtimeQueryScope(),
+  ) => [...usageKeys.all(scope), "session", appType, sessionId] as const,
 };
 
 /** 把 UI 侧的 "all" 哨兵归一成 undefined（后端语义：不过滤）。 */
@@ -186,6 +215,8 @@ function normalizeScopeFilters(filters?: UsageScopeFilters): UsageScopeFilters {
 }
 
 // Hooks
+// 统计类查询都带 keepPreviousData：换筛选、时间范围、翻页时先留着上一份数据，
+// 新数据到了再换，不让指标闪成「…」、请求日志表塌成骨架。
 export function useUsageSummary(
   range: UsageRangeSelection,
   filters?: UsageScopeFilters,
@@ -212,6 +243,7 @@ export function useUsageSummary(
         effective.model,
       );
     },
+    placeholderData: scopedUsagePlaceholder,
     refetchInterval: options?.refetchInterval ?? DEFAULT_REFETCH_INTERVAL_MS,
     refetchIntervalInBackground: options?.refetchIntervalInBackground ?? false,
   });
@@ -241,6 +273,7 @@ export function useUsageSummaryByApp(
         filters?.model,
       );
     },
+    placeholderData: scopedUsagePlaceholder,
     refetchInterval: options?.refetchInterval ?? DEFAULT_REFETCH_INTERVAL_MS,
     refetchIntervalInBackground: options?.refetchIntervalInBackground ?? false,
   });
@@ -272,6 +305,30 @@ export function useUsageTrends(
         effective.model,
       );
     },
+    enabled: options?.enabled ?? true,
+    placeholderData: scopedUsagePlaceholder,
+    refetchInterval: options?.refetchInterval ?? DEFAULT_REFETCH_INTERVAL_MS,
+    refetchIntervalInBackground: options?.refetchIntervalInBackground ?? false,
+  });
+}
+
+/** 最早有用量记录的日期，「全部」的按年热力图据此决定从哪一年画起 */
+export function useUsageFirstDate(
+  filters?: UsageScopeFilters,
+  options?: UsageQueryOptions,
+) {
+  const scope = useRuntimeQueryScope();
+  const effective = normalizeScopeFilters(filters);
+  return useQuery({
+    // 热力图年份必须随当前操作主机切换，不能沿用上一个主机的历史范围。
+    queryKey: usageKeys.firstDate(effective, scope),
+    queryFn: () =>
+      usageApi.getUsageFirstDate(
+        effective.appType,
+        effective.providerName,
+        effective.model,
+      ),
+    placeholderData: scopedUsagePlaceholder,
     refetchInterval: options?.refetchInterval ?? DEFAULT_REFETCH_INTERVAL_MS,
     refetchIntervalInBackground: options?.refetchIntervalInBackground ?? false,
   });
@@ -303,6 +360,7 @@ export function useProviderStats(
         effective.model,
       );
     },
+    placeholderData: scopedUsagePlaceholder,
     refetchInterval: options?.refetchInterval ?? DEFAULT_REFETCH_INTERVAL_MS,
     refetchIntervalInBackground: options?.refetchIntervalInBackground ?? false,
   });
@@ -334,6 +392,7 @@ export function useModelStats(
         effective.model,
       );
     },
+    placeholderData: scopedUsagePlaceholder,
     refetchInterval: options?.refetchInterval ?? DEFAULT_REFETCH_INTERVAL_MS,
     refetchIntervalInBackground: options?.refetchIntervalInBackground ?? false,
   });
@@ -364,6 +423,7 @@ export function useRequestLogs({
       const effectiveFilters = { ...filters, ...resolveUsageRange(range) };
       return usageApi.getRequestLogs(effectiveFilters, page, pageSize);
     },
+    placeholderData: scopedUsagePlaceholder,
     refetchInterval: options?.refetchInterval ?? DEFAULT_REFETCH_INTERVAL_MS, // 每30秒自动刷新
     refetchIntervalInBackground: options?.refetchIntervalInBackground ?? false,
   });
@@ -375,6 +435,32 @@ export function useRequestDetail(requestId: string) {
     queryKey: usageKeys.detail(requestId, scope),
     queryFn: () => usageApi.getRequestDetail(requestId),
     enabled: !!requestId,
+  });
+}
+
+/**
+ * 会话日志扫描（后台定时或手动同步）最近一次完成的时间（毫秒）。
+ * 后台每 60 秒扫一次，这里 30 秒问一次；挂在 usage 下，同步后跟着失效重取。
+ */
+export function useSessionUsageLastSync() {
+  const scope = useRuntimeQueryScope();
+  return useQuery({
+    // 后台扫描进度属于当前主机，切目标时必须读取对应 Agent 的扫描时间。
+    queryKey: [...usageKeys.all(scope), "session-last-sync"] as const,
+    queryFn: () => usageApi.getSessionUsageLastSync(),
+    refetchInterval: DEFAULT_REFETCH_INTERVAL_MS,
+    refetchIntervalInBackground: false,
+  });
+}
+
+/** 单个会话的用量汇总（会话阅读页头部），只数会话日志导入的行。 */
+export function useSessionUsageSummary(appType: string, sessionId: string) {
+  const scope = useRuntimeQueryScope();
+  return useQuery({
+    queryKey: usageKeys.session(appType, sessionId, scope),
+    queryFn: () => usageApi.getSessionUsageSummary(appType, sessionId),
+    refetchInterval: DEFAULT_REFETCH_INTERVAL_MS,
+    refetchIntervalInBackground: false,
   });
 }
 
