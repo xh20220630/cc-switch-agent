@@ -1,0 +1,33 @@
+{
+  "version": "0.0.4",
+  "items": [
+    {
+      "type": "improve",
+      "zh": "同步上游 4.0.10，带来新侧栏、聚合模式和会话阅读器",
+      "zh-TW": "同步上游 4.0.10，帶來新側欄、聚合模式和工作階段閱讀器",
+      "en": "Sync upstream 4.0.10 with the new sidebar, aggregation mode and session reader",
+      "ja": "上流 4.0.10 を同期し、新サイドバー、集約モード、会話リーダーを導入"
+    },
+    {
+      "type": "fix",
+      "zh": "远程供应商同步与用量查询适配新版界面，切换主机后正确刷新",
+      "zh-TW": "遠端供應商同步與用量查詢適配新版介面，切換主機後正確更新",
+      "en": "Remote provider sync and usage queries now work with the new UI and refresh per host",
+      "ja": "リモート同期と使用量照会を新 UI に対応し、接続先ごとに正しく更新"
+    },
+    {
+      "type": "fix",
+      "zh": "远程请求与本机聚合配置保持隔离，避免误用其他环境的供应商",
+      "zh-TW": "遠端請求與本機聚合設定保持隔離，避免誤用其他環境的供應商",
+      "en": "Remote requests stay separate from local aggregation settings and provider selection",
+      "ja": "リモート要求とローカル集約設定を分離し、接続先をまたぐ誤選択を防止"
+    },
+    {
+      "type": "improve",
+      "zh": "Agent 数据库升级至 v20，支持会话用量汇总和扫描进度查询",
+      "zh-TW": "Agent 資料庫升級至 v20，支援工作階段用量彙總和掃描進度查詢",
+      "en": "Agent databases upgrade to schema v20 with session usage summaries and scan status",
+      "ja": "Agent DB を v20 に更新し、会話使用量の集計とスキャン状況に対応"
+    }
+  ]
+}

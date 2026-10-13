@@ -445,6 +445,10 @@ jobs:
     permissions:
       contents: write
     steps:
+      # 发布说明随 tag 保存，必须先检出当前版本，避免用固定模板覆盖真实更新内容。
+      - name: Checkout
+        uses: actions/checkout@v6
+
       - name: Download built release artifacts
         uses: actions/download-artifact@v8
         with:
@@ -467,21 +471,7 @@ jobs:
           # release，否则 GitHub 不产生 latest 指针，updater 端点 …/latest/download/
           # latest.json 返回 404，客户端检查更新永远失败。
           prerelease: ${{ contains(github.ref_name, '-') }}
-          body: |
-            ## CC Switch ${{ github.ref_name }}
-
-            🌐 **Only Official Website / 唯一官方网站 / 唯一の公式サイト**: [ccswitch.io](https://ccswitch.io)
-
-            Claude Code 供应商切换工具
-
-            ### 下载
-
-            - **Windows (x86_64)**: `CC-Switch-${{ github.ref_name }}-Windows.msi`（安装版）或 `CC-Switch-${{ github.ref_name }}-Windows-Portable.zip`（绿色版）
-            - **Windows (ARM64)**: `CC-Switch-${{ github.ref_name }}-Windows-arm64.msi`（安装版）或 `CC-Switch-${{ github.ref_name }}-Windows-arm64-Portable.zip`（绿色版）
-            - **Linux (x86_64)**: `CC-Switch-${{ github.ref_name }}-Linux-x86_64.AppImage` / `.deb` / `.rpm`
-            - **Linux (ARM64)**: `CC-Switch-${{ github.ref_name }}-Linux-arm64.AppImage` / `.deb` / `.rpm`
-
-            ---
+          body_path: docs/release-notes/${{ github.ref_name }}-zh.md
           files: release-assets/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -526,7 +516,8 @@ jobs:
           linux_x64_rpm_url=""; linux_x64_rpm_sig=""
           linux_arm64_rpm_url=""; linux_arm64_rpm_sig=""
           shopt -s nullglob
-          for sig in release-assets/*.sig; do
+          # 下载目录为 dl；必须从同一目录收集签名，避免平台清单为空。
+          for sig in dl/*.sig; do
             base=${sig%.sig}
             fname=$(basename "$base")
             url="$base_url/$fname"
@@ -617,7 +608,7 @@ jobs:
             echo '}'
           } > "$tmp_json"
           echo "Generated latest.json:" && cat "$tmp_json"
-          mv "$tmp_json" release-assets/latest.json
+          mv "$tmp_json" latest.json
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v3
         with:
@@ -625,23 +616,7 @@ jobs:
           name: CC Switch ${{ github.ref_name }}
           # fork 的稳定版本标签直接发布，只有带后缀的标签标记为预发布。
           prerelease: ${{ contains(github.ref_name, '-') }}
-          body: |
-            ## CC Switch ${{ github.ref_name }}
-
-            🌐 **Only Official Website / 唯一官方网站 / 唯一の公式サイト**: [ccswitch.io](https://ccswitch.io)
-
-            Claude Code 供应商切换工具
-
-            ### 下载
-
-            - **Windows (x86_64)**: `CC-Switch-${{ github.ref_name }}-Windows.msi`（安装版）或 `CC-Switch-${{ github.ref_name }}-Windows-Portable.zip`（绿色版）
-            - **Windows (ARM64)**: `CC-Switch-${{ github.ref_name }}-Windows-arm64.msi`（安装版）或 `CC-Switch-${{ github.ref_name }}-Windows-arm64-Portable.zip`（绿色版）
-            - **Linux (x86_64)**: `CC-Switch-${{ github.ref_name }}-Linux-x86_64.AppImage` / `.deb` / `.rpm`
-            - **Linux (ARM64)**: `CC-Switch-${{ github.ref_name }}-Linux-arm64.AppImage` / `.deb` / `.rpm`
-
-            > `.tar.gz` 为 Tauri updater 自动更新专用，无需手动下载。
-
-            ---
-          files: release-assets/*
+          # 这里只追加更新清单，保留 publish-release 写入的版本说明。
+          files: latest.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

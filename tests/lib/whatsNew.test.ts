@@ -87,10 +87,19 @@ describe("language and links", () => {
     expect(resolveWhatsNewLanguage("fr")).toBe("en");
   });
 
-  it("links to the website changelog, Traditional Chinese uses the zh pages", () => {
+  // 新 fork 摘要不能指向不存在的官网版本页，上游历史版本仍保留官网链接。
+  it("links fork versions to releases and keeps upstream changelog links", () => {
     expect(changelogUrl("en", "4.0.2")).toBe(
       "https://ccswitch.io/en/changelog/4.0.2",
     );
-    expect(changelogUrl("zh-TW")).toBe("https://ccswitch.io/zh/changelog");
+    expect(changelogUrl("zh-TW", "4.0.2")).toBe(
+      "https://ccswitch.io/zh/changelog/4.0.2",
+    );
+    expect(changelogUrl("zh-TW")).toBe(
+      "https://github.com/xh20220630/cc-switch-agent/releases",
+    );
+    expect(changelogUrl("en", "0.0.4")).toBe(
+      "https://github.com/xh20220630/cc-switch-agent/releases/tag/v0.0.4",
+    );
   });
 });

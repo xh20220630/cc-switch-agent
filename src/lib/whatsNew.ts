@@ -88,11 +88,15 @@ export function resolveWhatsNewLanguage(language: string): WhatsNewLanguage {
     : "en";
 }
 
-/** 官网更新日志：不带版本是列表页。官网只有 zh / en / ja，繁中用简中页面 */
+/** fork 的 0.x 版本说明在本仓库 Release；保留上游 4.x 等历史版本的官网详情链接。 */
 export function changelogUrl(
   language: WhatsNewLanguage,
   version?: string,
 ): string {
+  const forkReleases = "https://github.com/xh20220630/cc-switch-agent/releases";
+  if (!version) return forkReleases;
+  if (version.startsWith("0.")) return `${forkReleases}/tag/v${version}`;
+  // 上游官网只有 zh / en / ja，繁体中文沿用简体页面。
   const siteLanguage = language === "zh-TW" ? "zh" : language;
   const base = `https://ccswitch.io/${siteLanguage}/changelog`;
   return version ? `${base}/${version}` : base;

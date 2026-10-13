@@ -1,6 +1,6 @@
 [package]
 name = "cc-switch"
-version = "0.0.3"
+version = "0.0.4"
 description = "All-in-One Assistant for Claude Code, Codex & Gemini CLI"
 authors = ["Jason Young"]
 license = "MIT"
@@ -103,6 +103,8 @@ tauri-plugin-single-instance = "2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 webkit2gtk = { version = "2.0.1", features = ["v2_16"] }
+# 上游 Wayland 标题栏修复直接使用 GTK 类型；不能只依赖 Tauri 的传递依赖。
+gtk = "0.18"
 
 [target.'cfg(not(target_os = "windows"))'.dependencies]
 libc = "0.2"
@@ -110,8 +112,10 @@ libc = "0.2"
 [target.'cfg(target_os = "windows")'.dependencies]
 winreg = "0.52"
 windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
     "Win32_Globalization",
     "Win32_Storage_FileSystem",
+    "Win32_System_Threading",
     "Win32_UI_Shell",
     "Win32_Security_Cryptography",
     "Win32_System_Memory",
@@ -126,7 +130,8 @@ objc2-app-kit = { version = "0.2", features = ["NSColor"] }
 
 # Optimize release binary size to help reduce AppImage footprint
 [profile.release]
-codegen-units = 1
+# 沿用上游大体量桌面 crate 的发布编译配置，允许 LLVM 并行；以少量包体积换取构建时间。
+codegen-units = 16
 lto = "thin"
 opt-level = "s"
 # 使用 unwind 以便 panic hook 能捕获 backtrace（abort 会直接终止无法捕获）

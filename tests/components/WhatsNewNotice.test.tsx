@@ -206,7 +206,8 @@ describe("WhatsNewNotice", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "whatsNew.viewFull" }));
     expect(mocks.openExternal).toHaveBeenLastCalledWith(
-      "https://ccswitch.io/zh/changelog",
+      // fork 的完整记录位于仓库 Release 列表，避免打开上游的独立版本页。
+      "https://github.com/xh20220630/cc-switch-agent/releases",
     );
     await waitFor(() => expect(title()).not.toBeInTheDocument());
     expect(mocks.save).toHaveBeenCalledWith(
