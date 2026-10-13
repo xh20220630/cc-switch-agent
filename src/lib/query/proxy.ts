@@ -1,3 +1,5 @@
+// 供应商和模式查询共用带主机的键，写入后的失效才能刷新当前目标的列表。
+import { providerKeys } from "@/lib/query/queries";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { proxyApi } from "@/lib/api/proxy";
 import { toast } from "@/lib/toast";
@@ -54,12 +56,12 @@ export function useProxyTakeoverStatus(poll = true) {
 }
 
 /**
- * 应用的模式状态（直连 / 路由 / 聚合、路由目标、直连那家）。放在 ["providers", appId] 前缀下：
+ * 应用的模式状态（直连 / 路由 / 聚合、路由目标、直连那家）。放在 providerKeys.byApp(appId) 前缀下：
  * 进出模式、切换供应商时随供应商列表一起失效。
  */
 export function useAppMode(appType: string, enabled = true) {
   return useQuery({
-    queryKey: ["providers", appType, "mode"] as const,
+    queryKey: [...providerKeys.byApp(appType), "mode"] as const,
     queryFn: () => proxyApi.getAppMode(appType),
     enabled,
     placeholderData: (previous: AppModeView | undefined) => previous,
@@ -68,22 +70,22 @@ export function useAppMode(appType: string, enabled = true) {
 
 /**
  * 直连供应商（路由模式下退出路由时写回的那家）。
- * 放在 ["providers", appId] 前缀下：切换、编辑供应商时随供应商列表一起失效。
+ * 放在 providerKeys.byApp(appId) 前缀下：切换、编辑供应商时随供应商列表一起失效。
  */
 export function useDirectProviderId(appType: string, enabled: boolean) {
   return useQuery({
-    queryKey: ["providers", appType, "direct"] as const,
+    queryKey: [...providerKeys.byApp(appType), "direct"] as const,
     queryFn: () => proxyApi.getDirectProvider(appType),
     enabled,
   });
 }
 
 /**
- * Stack 模型名单。放在 ["providers", appId] 前缀下：编辑、删除供应商时随列表一起失效。
+ * Stack 模型名单。放在 providerKeys.byApp(appId) 前缀下：编辑、删除供应商时随列表一起失效。
  */
 export function useProxyStack(appType: string, enabled: boolean) {
   return useQuery({
-    queryKey: ["providers", appType, "stack"] as const,
+    queryKey: [...providerKeys.byApp(appType), "stack"] as const,
     queryFn: () => proxyApi.getProxyStack(appType),
     enabled,
   });
@@ -150,7 +152,7 @@ export function useSetProxyStackMember() {
     },
     onSettled: (_data, _error, variables) => {
       queryClient.invalidateQueries({
-        queryKey: ["providers", variables.appType],
+        queryKey: providerKeys.byApp(variables.appType),
       });
     },
   });
@@ -180,7 +182,7 @@ export function useAdoptCodexStackCatalog() {
       );
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ["providers", "codex"] });
+      queryClient.invalidateQueries({ queryKey: providerKeys.byApp("codex") });
     },
   });
 }
@@ -214,7 +216,7 @@ export function useRestartCodexAppServerDaemon() {
       );
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ["providers", "codex"] });
+      queryClient.invalidateQueries({ queryKey: providerKeys.byApp("codex") });
     },
   });
 }
@@ -228,7 +230,7 @@ export function useAcknowledgeCodexStaleClients() {
   return useMutation({
     mutationFn: () => proxyApi.acknowledgeCodexStaleClients(),
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ["providers", "codex"] });
+      queryClient.invalidateQueries({ queryKey: providerKeys.byApp("codex") });
     },
   });
 }
@@ -255,7 +257,7 @@ export function useSetProxyTakeoverForApp() {
       queryClient.invalidateQueries({ queryKey: proxyKeys.takeoverStatus });
       // 进出路由模式会改「当前」显示的供应商（路由模式下是路由到的那家）。
       queryClient.invalidateQueries({
-        queryKey: ["providers", variables.appType],
+        queryKey: providerKeys.byApp(variables.appType),
       });
     },
   });

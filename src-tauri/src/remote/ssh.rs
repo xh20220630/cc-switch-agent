@@ -615,7 +615,8 @@ mod askpass_tests {
         let envs: Vec<(_, _)> = command.get_envs().collect();
         let env = |key: &str| {
             envs.iter()
-                .find(|(name, _)| *name == OsString::from(key))
+                // 借用环境键直接比较，兼容上游 Rust 1.95 的 lint，避免仅为查找创建临时字符串。
+                .find(|(name, _)| *name == std::ffi::OsStr::new(key))
                 .and_then(|(_, value)| value.map(|value| value.to_os_string()))
         };
         assert_eq!(env("SSH_ASKPASS"), Some(guard.askpass_target.clone()));

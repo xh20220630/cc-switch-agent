@@ -1,3 +1,5 @@
+// 供应商和模式查询共用带主机的键，写入后的失效才能刷新当前目标的列表。
+import { providerKeys } from "@/lib/query/queries";
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
@@ -35,7 +37,7 @@ export function useModeActions(app: AppId) {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: proxyKeys.status }),
       queryClient.invalidateQueries({ queryKey: proxyKeys.takeoverStatus }),
-      queryClient.invalidateQueries({ queryKey: ["providers", app] }),
+      queryClient.invalidateQueries({ queryKey: providerKeys.byApp(app) }),
     ]);
     providersApi.updateTrayMenu().catch(() => undefined);
   }, [app, queryClient]);

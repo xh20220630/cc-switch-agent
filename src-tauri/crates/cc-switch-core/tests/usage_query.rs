@@ -1,6 +1,73 @@
 use cc_switch_core::{HeadlessState, LogFilters, UsageScope, UsageService};
 use rusqlite::params;
 
+/// 新阅读页只数客户端会话日志；同会话 ID 的代理请求不能再次计入会话汇总。
+#[test]
+fn session_summary_excludes_proxy_rows_and_first_date_includes_rollups() {
+    let home = tempfile::tempdir().expect("创建临时 HOME");
+    let state = HeadlessState::memory(home.path()).expect("创建隔离数据库");
+    seed_usage_fixture(&state);
+    state.with_connection(|connection| {
+        connection.execute("UPDATE proxy_request_logs SET session_id = 'shared-session'", [])?;
+        insert_log(connection, "proxy-copy", "_codex_session", "codex", "gpt-5",
+            1000, 100, 300, 100, 1, "0.020000", 200, 1_700_000_200, "proxy")?;
+        connection.execute("UPDATE proxy_request_logs SET session_id = 'shared-session' WHERE request_id = 'proxy-copy'", [])?;
+        connection.execute("INSERT INTO usage_daily_rollups
+            (date, app_type, provider_id, model, request_model, pricing_model, request_count,
+             success_count, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
+             total_cost_usd, avg_latency_ms)
+            VALUES ('2020-01-01', 'codex', '_codex_session', 'gpt-5', 'gpt-5', 'gpt-5',
+                    1, 1, 100, 10, 0, 0, '0.01', 100)", [])?;
+        Ok(())
+    }).expect("准备会话和历史汇总");
+    let summary =
+        UsageService::session_summary(&state, "codex", "shared-session").expect("查询会话");
+    assert_eq!(summary.total_requests, 1);
+    assert_eq!(summary.total_cost, "0.020000");
+    assert_eq!(
+        UsageService::first_date(
+            &state,
+            UsageScope {
+                app_type: Some("codex".into()),
+                ..UsageScope::all()
+            }
+        )
+        .expect("查询历史起点"),
+        Some("2020-01-01".into())
+    );
+    assert_eq!(
+        UsageService::session_summary(&state, "codex", "missing")
+            .expect("查询缺失会话")
+            .total_requests,
+        0
+    );
+}
+
+/// 扫描完成时间属于单个目标状态；新 Agent 没扫过时不继承另一台主机的时间。
+#[test]
+fn remote_session_sync_clock_is_scoped_to_headless_state() {
+    let home = tempfile::tempdir().expect("创建临时 HOME");
+    let state = HeadlessState::memory(home.path()).expect("创建隔离数据库");
+    let invoke = |command| {
+        cc_switch_core::dispatch_command(&state, command, serde_json::json!({}))
+            .expect("执行 Usage 命令")
+    };
+    assert_eq!(invoke("usage.session_last_sync"), serde_json::Value::Null);
+    invoke("usage.session_sync");
+    assert!(
+        invoke("usage.session_last_sync")
+            .as_i64()
+            .expect("完成时间")
+            > 0
+    );
+    let other = HeadlessState::memory(home.path()).expect("另一个隔离目标");
+    assert_eq!(
+        cc_switch_core::dispatch_command(&other, "usage.session_last_sync", serde_json::json!({}))
+            .expect("读取另一目标时间"),
+        serde_json::Value::Null
+    );
+}
+
 #[test]
 fn usage_queries_match_dashboard_semantics() {
     let home = tempfile::tempdir().expect("创建临时 HOME");

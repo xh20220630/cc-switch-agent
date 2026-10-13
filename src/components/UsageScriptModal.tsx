@@ -1,3 +1,5 @@
+import { usageKeys } from "@/lib/query/usage";
+import { useRuntimeQueryScope } from "@/lib/runtime/queryScope";
 import React, { useState } from "react";
 import { Play, Wand2, Eye, EyeOff, Save, ExternalLink } from "lucide-react";
 import { toast } from "@/lib/toast";
@@ -253,6 +255,8 @@ const UsageScriptModal: React.FC<UsageScriptModalProps> = ({
 }) => {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
+  // 手动查询结果只能回写发起操作时的主机缓存，不能覆盖其他环境同名供应商的额度。
+  const scope = useRuntimeQueryScope();
   const { data: settingsData } = useSettingsQuery();
   const [showUsageConfirm, setShowUsageConfirm] = useState(false);
   const isDarkMode = useDarkMode();
@@ -614,7 +618,10 @@ const UsageScriptModal: React.FC<UsageScriptModalProps> = ({
             duration: 3000,
             closeButton: true,
           });
-          queryClient.setQueryData(["usage", provider.id, appId], result);
+          queryClient.setQueryData(
+            usageKeys.script(provider.id, appId, scope),
+            result,
+          );
         } else {
           toast.error(
             `${t("usageScript.testFailed")}: ${result.error || t("endpointTest.noResult")}`,
@@ -663,10 +670,13 @@ const UsageScriptModal: React.FC<UsageScriptModalProps> = ({
             used: tier.utilization,
             unit: "%",
           }));
-          queryClient.setQueryData(["usage", provider.id, appId], {
-            success: true,
-            data: usageData,
-          });
+          queryClient.setQueryData(
+            usageKeys.script(provider.id, appId, scope),
+            {
+              success: true,
+              data: usageData,
+            },
+          );
         } else {
           toast.error(
             `${t("usageScript.testFailed")}: ${quota.error || t("endpointTest.noResult")}`,
@@ -693,7 +703,7 @@ const UsageScriptModal: React.FC<UsageScriptModalProps> = ({
           closeButton: true,
         });
         // 更新缓存
-        queryClient.setQueryData(["usage", provider.id, appId], {
+        queryClient.setQueryData(usageKeys.script(provider.id, appId, scope), {
           success: true,
           data: [
             {
@@ -735,7 +745,10 @@ const UsageScriptModal: React.FC<UsageScriptModalProps> = ({
         });
 
         // 🔧 测试成功后，更新主界面列表的用量查询缓存
-        queryClient.setQueryData(["usage", provider.id, appId], result);
+        queryClient.setQueryData(
+          usageKeys.script(provider.id, appId, scope),
+          result,
+        );
       } else {
         toast.error(
           `${t("usageScript.testFailed")}: ${result.error || t("endpointTest.noResult")}`,

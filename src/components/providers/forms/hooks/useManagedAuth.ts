@@ -1,3 +1,5 @@
+// 供应商和模式查询共用带主机的键，写入后的失效才能刷新当前目标的列表。
+import { providerKeys } from "@/lib/query/queries";
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -239,7 +241,7 @@ export function useManagedAuth(
     onSettled: async () => {
       if (authProvider === "codex_oauth") {
         await queryClient.invalidateQueries({
-          queryKey: ["providers", "codex"],
+          queryKey: providerKeys.byApp("codex"),
         });
       }
     },
@@ -269,7 +271,7 @@ export function useManagedAuth(
     onSettled: async () => {
       if (authProvider === "codex_oauth") {
         await queryClient.invalidateQueries({
-          queryKey: ["providers", "codex"],
+          queryKey: providerKeys.byApp("codex"),
         });
       }
     },

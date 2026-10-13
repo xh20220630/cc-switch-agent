@@ -1,3 +1,5 @@
+// 缓存夹具与生产查询共用主机键，保证断言覆盖当前目标的真实订阅。
+import { providerKeys } from "@/lib/query/queries";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -81,12 +83,16 @@ describe("CodexStaleClientsNotice", () => {
       screen.getByText("proxy.stackMode.codexStale.unverifiedHint"),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "proxy.stackMode.codexStale.restart" }),
+      screen.queryByRole("button", {
+        name: "proxy.stackMode.codexStale.restart",
+      }),
     ).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "common.close" }));
     await waitFor(() => expect(acknowledged).toBe(1));
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["providers", "codex"] });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: providerKeys.byApp("codex"),
+    });
   });
 
   it("does not record a dismissal for a notice backed by the process table", () => {
@@ -123,7 +129,9 @@ describe("CodexStaleClientsNotice", () => {
     ).not.toBeInTheDocument();
 
     fireEvent.click(
-      screen.getByRole("button", { name: "proxy.stackMode.codexStale.restart" }),
+      screen.getByRole("button", {
+        name: "proxy.stackMode.codexStale.restart",
+      }),
     );
     // 只是打开确认框：会中断正在运行的任务，没确认之前不重启。
     expect(
@@ -132,7 +140,9 @@ describe("CodexStaleClientsNotice", () => {
     expect(restarts).toBe(0);
 
     fireEvent.click(
-      screen.getByRole("button", { name: "proxy.stackMode.codexStale.confirm" }),
+      screen.getByRole("button", {
+        name: "proxy.stackMode.codexStale.confirm",
+      }),
     );
     await waitFor(() =>
       expect(toast.success).toHaveBeenCalledWith(
@@ -142,7 +152,9 @@ describe("CodexStaleClientsNotice", () => {
     );
     expect(restarts).toBe(1);
     // 重新查 Stack 名单，提示随之消失。
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["providers", "codex"] });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: providerKeys.byApp("codex"),
+    });
     await waitFor(() =>
       expect(
         screen.queryByText("proxy.stackMode.codexStale.confirmMessage"),

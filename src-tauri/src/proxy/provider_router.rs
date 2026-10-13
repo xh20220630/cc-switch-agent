@@ -426,6 +426,36 @@ mod tests {
         assert!(breaker.allow_request().await.allowed);
     }
 
+    /// 上游改用模式控制器后，SSH 隧道仍只使用远程指针，并保持本机选择不变。
+    #[tokio::test]
+    #[serial]
+    async fn test_remote_current_stays_separate_from_local_mode_selection() {
+        let _home = TempHome::new();
+        let db = Arc::new(Database::memory().unwrap());
+        for id in ["local", "remote"] {
+            db.save_provider(
+                "claude",
+                &Provider::with_id(id.into(), id.into(), json!({}), None),
+            )
+            .unwrap();
+        }
+        db.set_current_provider("claude", "local").unwrap();
+        let router = ProviderRouter::new(db.clone());
+        router.set_remote_current("claude", "remote".into()).await;
+        assert_eq!(
+            router.select_providers("claude", true).await.unwrap()[0].id,
+            "remote"
+        );
+        assert_eq!(
+            router.select_providers("claude", false).await.unwrap()[0].id,
+            "local"
+        );
+        assert_eq!(
+            db.get_current_provider("claude").unwrap().as_deref(),
+            Some("local")
+        );
+    }
+
     #[tokio::test]
     #[serial]
     async fn test_failover_disabled_uses_current_provider() {

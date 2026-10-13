@@ -1,3 +1,5 @@
+// 供应商和模式查询共用带主机的键，写入后的失效才能刷新当前目标的列表。
+import { providerKeys } from "@/lib/query/queries";
 import { useEffect, useMemo, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
@@ -201,7 +203,7 @@ export function SwitchModePanel({
       );
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["failoverQueue", app] }),
-        queryClient.invalidateQueries({ queryKey: ["providers", app] }),
+        queryClient.invalidateQueries({ queryKey: providerKeys.byApp(app) }),
       ]);
       toast.success(
         t("mode.queueMoved", { name: provider.name, position: target + 1 }),
@@ -214,7 +216,9 @@ export function SwitchModePanel({
   const rememberDefault = async (provider: Provider) => {
     try {
       await proxyApi.setProxyRoute(app, provider.id);
-      await queryClient.invalidateQueries({ queryKey: ["providers", app] });
+      await queryClient.invalidateQueries({
+        queryKey: providerKeys.byApp(app),
+      });
       toast.success(
         t("mode.toast.defaultRemembered", { provider: provider.name }),
         { closeButton: true },

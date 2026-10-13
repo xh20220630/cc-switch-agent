@@ -1,3 +1,5 @@
+// 供应商和模式查询共用带主机的键，写入后的失效才能刷新当前目标的列表。
+import { providerKeys } from "@/lib/query/queries";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
@@ -119,7 +121,7 @@ export function RoutingSection({ onOpenApp }: RoutingSectionProps) {
 
   const modeQueries = useQueries({
     queries: PROXY_APP_IDS.map((app) => ({
-      queryKey: ["providers", app, "mode"],
+      queryKey: [...providerKeys.byApp(app), "mode"],
       queryFn: () => proxyApi.getAppMode(app),
     })),
   });

@@ -1,3 +1,5 @@
+// 缓存夹具与生产查询共用主机键，保证断言覆盖当前目标的真实订阅。
+import { providerKeys } from "@/lib/query/queries";
 import type { ReactNode } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -276,10 +278,10 @@ describe("useManagedAuth", () => {
           mutations: { retry: false },
         },
       });
-      queryClient.setQueryData(["providers", "codex"], {
+      queryClient.setQueryData(providerKeys.byApp("codex"), {
         current: "old-binding",
       });
-      queryClient.setQueryData(["providers", "claude"], {
+      queryClient.setQueryData(providerKeys.byApp("claude"), {
         current: "unrelated",
       });
       const { result } = renderHook(() => useManagedAuth("codex_oauth"), {
@@ -307,12 +309,12 @@ describe("useManagedAuth", () => {
       );
       await waitFor(() =>
         expect(
-          queryClient.getQueryState(["providers", "codex"])?.isInvalidated,
+          queryClient.getQueryState(providerKeys.byApp("codex"))?.isInvalidated,
         ).toBe(true),
       );
       await waitFor(() => expect(result.current.accounts).toHaveLength(0));
       expect(
-        queryClient.getQueryState(["providers", "claude"])?.isInvalidated,
+        queryClient.getQueryState(providerKeys.byApp("claude"))?.isInvalidated,
       ).toBe(false);
       if (fails) expect(result.current.error).toContain("解绑失败");
     },

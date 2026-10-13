@@ -1,3 +1,4 @@
+// 缓存夹具与生产查询共用主机键，保证断言覆盖当前目标的真实订阅。
 import type { ReactNode } from "react";
 import { act, renderHook } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -153,7 +154,7 @@ describe("useUpdateProviderMutation", () => {
       queryKey: ["pi", "currentState"],
     });
     expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["providers", "pi"],
+      queryKey: providerKeys.byApp("pi"),
     });
   });
 });

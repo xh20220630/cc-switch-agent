@@ -375,7 +375,8 @@ describe("useProviderActions", () => {
     });
 
     expect(toastWarningMock).not.toHaveBeenCalled();
-    expect(switchProviderMutateAsync).toHaveBeenCalledWith(provider.id);
+    // fork 为远程代理携带完整供应商快照，切换 mutation 的参数是供应商对象。
+    expect(switchProviderMutateAsync).toHaveBeenCalledWith(provider);
   });
 
   it("does not warn for Claude Desktop model mapping, which starts routing itself", async () => {

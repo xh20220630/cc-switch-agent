@@ -85,10 +85,13 @@ impl RequestContext {
     /// * `app_type` - 应用类型
     /// * `tag` - 日志标签
     /// * `app_type_str` - 应用类型字符串
+    /// * `is_remote` - SSH 隧道来源，使用远程 current，和本机模式指针隔离
     /// * `stack` - Stack 模型的目标（请求体里的 `model` 已换成上游名）
     ///
     /// # Errors
     /// 返回 `ProxyError` 如果 Provider 选择失败
+    // 两类路由信息需要分别传入：来源决定凭据，Stack 目标决定模型，不将它们折叠成布尔值。
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         state: &ProxyState,
         body: &serde_json::Value,
@@ -169,7 +172,8 @@ impl RequestContext {
 
                 // Stack 模式不做故障转移：只发往默认那家，和故障转移关着时一样跳过熔断器选家；
                 // 队列留着，回到路由模式恢复。故障转移本来就关着时不用读模式。
-                let stack_mode = app_config.auto_failover_enabled
+                let stack_mode = !is_remote
+                    && app_config.auto_failover_enabled
                     && crate::mode::stack::stack_mode_now(&app_type);
                 let providers = if stack_mode {
                     app_config.auto_failover_enabled = false;

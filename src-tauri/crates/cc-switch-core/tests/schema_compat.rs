@@ -1,6 +1,47 @@
 use std::path::Path;
 
 use cc_switch_core::{CoreError, HeadlessState, SchemaError, DESKTOP_SCHEMA_VERSION};
+
+/// 桌面 v18 库中的管理表必须在 Agent 中升级到 v20，同时保留已有应用开关。
+#[test]
+fn agent_upgrades_v18_management_flags_without_resetting_existing_apps() {
+    let home = tempfile::tempdir().expect("创建临时 HOME");
+    drop(HeadlessState::open(home.path()).expect("初始化规范库"));
+    let path = home.path().join(".cc-switch/cc-switch.db");
+    let connection = rusqlite::Connection::open(&path).expect("打开测试数据库");
+    connection
+        .execute_batch(
+            "CREATE TABLE mcp_servers (id TEXT, enabled_claude BOOLEAN NOT NULL DEFAULT 0);
+        CREATE TABLE skills (id TEXT, enabled_claude BOOLEAN NOT NULL DEFAULT 0);
+        INSERT INTO mcp_servers VALUES ('mcp', 1);
+        INSERT INTO skills VALUES ('skill', 1);
+        PRAGMA user_version = 18;",
+        )
+        .expect("模拟 v18 管理表");
+    drop(connection);
+    let state = HeadlessState::open(home.path()).expect("Agent 升级旧库");
+    assert_eq!(
+        state.schema_version().expect("读取版本"),
+        DESKTOP_SCHEMA_VERSION
+    );
+    state
+        .with_connection(|connection| {
+            let mcp: (bool, bool, bool) = connection.query_row(
+                "SELECT enabled_claude, enabled_mcode, enabled_pi FROM mcp_servers",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )?;
+            let skill: (bool, bool) = connection.query_row(
+                "SELECT enabled_claude, enabled_mcode FROM skills",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            assert_eq!(mcp, (true, false, false));
+            assert_eq!(skill, (true, false));
+            Ok(())
+        })
+        .expect("确认新列和旧开关");
+}
 use rusqlite::Connection;
 
 const CANONICAL_REQUIRED_SCHEMA: &str = r#"

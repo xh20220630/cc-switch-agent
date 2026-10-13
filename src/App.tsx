@@ -71,6 +71,7 @@ import {
 import { Sidebar } from "@/components/shell/Sidebar";
 import { useUpdate } from "@/contexts/UpdateContext";
 import { NewLayoutDialog } from "@/components/shell/NewLayoutDialog";
+import { useRuntimeQueryScope } from "@/lib/runtime/queryScope";
 import {
   AppPageHeader,
   RuntimeTargetControlsContext,
@@ -163,6 +164,7 @@ function App() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const { hasUpdate } = useUpdate();
+  const scope = useRuntimeQueryScope();
 
   const [activeApp, setActiveApp] = useState<AppId>(getInitialApp);
   const sharedFeatureApp = sharedFeatureAppOf(activeApp);
@@ -307,9 +309,14 @@ function App() {
 
   const { isRunning: isProxyRunning, takeoverStatus } = useProxyStatus();
   const proxyAppId = isProxyAppId(activeApp) ? activeApp : null;
-  // 换了应用、新面板还没报上来时为 undefined：表单按应用实际生效的模式
+  // 本机新面板还没报上来时读取实际模式；远端显式使用完整直连表单，
+  // 防止表单默认值读取本机聚合模式后，隐藏远程供应商的配置编辑器。
   const currentModeView =
-    providerModeView?.app === activeApp ? providerModeView.view : undefined;
+    scope[0] !== "local"
+      ? "direct"
+      : providerModeView?.app === activeApp
+        ? providerModeView.view
+        : undefined;
   const openAddProvider = (modeView: AppMode | undefined) => {
     setFormModeView(modeView);
     setIsAddOpen(true);
@@ -841,7 +848,7 @@ function App() {
         });
       } else if (activeApp === "mcode") {
         await queryClient.invalidateQueries({
-          queryKey: ["providers", "mcode"],
+          queryKey: providerKeys.byApp("mcode"),
         });
       }
       toast.success(
@@ -1302,7 +1309,9 @@ function App() {
   };
 
   const renderProviderList = () => {
-    if (proxyAppId) {
+    // 上游模式面板控制本机配置文件；远端列表沿用 Agent 的切换流程，
+    // 避免用远端供应商 ID 改写本机直连、路由或聚合设置。
+    if (proxyAppId && scope[0] === "local") {
       const startupFailure = startupFailures.find(
         (failure) => failure.appType === proxyAppId,
       );

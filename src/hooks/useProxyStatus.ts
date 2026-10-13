@@ -1,3 +1,5 @@
+// 供应商和模式查询共用带主机的键，写入后的失效才能刷新当前目标的列表。
+import { providerKeys } from "@/lib/query/queries";
 /**
  * 代理服务状态管理 Hook
  */
@@ -146,7 +148,7 @@ export function useProxyStatus() {
       queryClient.invalidateQueries({ queryKey: proxyKeys.takeoverStatus });
       // 路由模式下「当前」是路由到的那家，进出路由都要刷新。
       queryClient.invalidateQueries({
-        queryKey: ["providers", variables.appType],
+        queryKey: providerKeys.byApp(variables.appType),
       });
     },
     onError: (error: Error) => {
@@ -177,7 +179,7 @@ export function useProxyStatus() {
       queryClient.invalidateQueries({ queryKey: proxyKeys.status });
       queryClient.invalidateQueries({ queryKey: proxyKeys.takeoverStatus });
       for (const app of apps) {
-        queryClient.invalidateQueries({ queryKey: ["providers", app] });
+        queryClient.invalidateQueries({ queryKey: providerKeys.byApp(app) });
       }
     },
     onError: (error: Error) => {

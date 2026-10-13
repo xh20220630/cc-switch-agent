@@ -1,3 +1,5 @@
+// 供应商和模式查询共用带主机的键，写入后的失效才能刷新当前目标的列表。
+import { providerKeys } from "@/lib/query/queries";
 import { useMemo } from "react";
 import { useQueries } from "@tanstack/react-query";
 import type { AppId } from "@/lib/api";
@@ -33,10 +35,10 @@ const MANAGED_AUTH_PROVIDERS: ManagedAuthProvider[] = [
  */
 export function useSidebarStatus() {
   const { data: proxyStatus } = useProxyStatusQuery();
-  // 和应用页的模式行同一份数据（["providers", app, "mode"]），进出模式时一起刷新
+  // 和应用页的模式行同一份数据（[...providerKeys.byApp(app), "mode"]），进出模式时一起刷新
   const modeQueries = useQueries({
     queries: PROXY_APP_IDS.map((app) => ({
-      queryKey: ["providers", app, "mode"],
+      queryKey: [...providerKeys.byApp(app), "mode"],
       queryFn: () => proxyApi.getAppMode(app),
     })),
   });
