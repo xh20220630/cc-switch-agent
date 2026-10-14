@@ -2,6 +2,7 @@ import type * as React from "react";
 import { useTranslation } from "react-i18next";
 import {
   ArrowDown,
+  ArrowLeftRight,
   ArrowUp,
   ChevronDown,
   CircleDot,
@@ -63,6 +64,8 @@ interface ProviderCardActionsProps {
   onEdit: () => void;
   onDelete: () => void;
   onDuplicate?: () => void;
+  /** 单条交换入口始终放在行内，和更多菜单中的本应用复制分开。 */
+  onExchange?: () => void;
   onTest?: () => void;
   isTesting?: boolean;
   onConfigureUsage?: () => void;
@@ -70,7 +73,7 @@ interface ProviderCardActionsProps {
 }
 
 /**
- * 卡片右侧（v7）：主操作位（状态文字或按钮）→ 上移 / 下移（故障转移队列）→ 编辑 → ⋯。
+ * 卡片右侧（v7）：主操作位 → 上移 / 下移 → 交换到其他位置 → 编辑 → ⋯。
  * 次要操作都在 ⋯ 里：跟当前模式有关的（聚合页的「设为默认」）在最前，然后是复制、检测连通、
  * 配置用量查询、打开终端、删除。
  * 按钮一律纯图标 + HoverTip；有禁用原因时改由 DisabledReason 的说明卡报原因。
@@ -81,6 +84,7 @@ export function ProviderCardActions({
   onEdit,
   onDelete,
   onDuplicate,
+  onExchange,
   onTest,
   isTesting,
   onConfigureUsage,
@@ -139,6 +143,24 @@ export function ProviderCardActions({
             </Button>
           </HoverTip>
         </div>
+      )}
+
+      {onExchange && (
+        <HoverTip
+          content={t("provider.exchange.action", { defaultValue: "交换到…" })}
+        >
+          <Button
+            variant="quiet"
+            size="icon-compact"
+            aria-label={t("provider.exchange.actionNamed", {
+              defaultValue: "交换 {{name}} 到…",
+              name: providerName,
+            })}
+            onClick={onExchange}
+          >
+            <ArrowLeftRight className="h-4 w-4" strokeWidth={1.5} />
+          </Button>
+        </HoverTip>
       )}
 
       <IconAction

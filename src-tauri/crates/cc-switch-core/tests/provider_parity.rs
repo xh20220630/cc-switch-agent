@@ -115,7 +115,8 @@ fn provider_writes_use_app_type_and_keep_exactly_one_current_row() {
 fn rejected_provider_mutations_leave_existing_rows_unchanged() {
     let home = tempfile::tempdir().expect("创建临时 HOME");
     let state = HeadlessState::memory(home.path()).expect("创建规范内存数据库");
-    ProviderService::add(&state, "claude", provider("a"), false).expect("新增 A");
+    // 当前项删除保护需要先显式启用；false 现在表示交换的待启用副本。
+    ProviderService::add(&state, "claude", provider("a"), true).expect("新增并启用 A");
 
     assert!(matches!(
         ProviderService::add(&state, "claude", provider("a"), false),

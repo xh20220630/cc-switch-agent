@@ -8,6 +8,18 @@ import type {
 } from "@/lib/runtime/types";
 
 export const remoteApi = {
+  /** 交换固定访问所选主机，不依赖或切换当前 Runtime；后端仅开放 provider.list / provider.add。 */
+  async invokeProviderTarget<T>(
+    targetId: string,
+    command: "provider.list" | "provider.add",
+    args: Record<string, unknown>,
+  ): Promise<T> {
+    return localInvoke<T>("remote_invoke_provider_target", {
+      targetId,
+      command,
+      args,
+    });
+  },
   async discoverTargets(): Promise<DiscoveredSshTarget[]> {
     // 服务器发现固定走本机 Tauri 边界；远端运行时不能读取操作者的 ~/.ssh/config。
     return await localInvoke("remote_discover_ssh_targets");

@@ -87,6 +87,23 @@ pub async fn update_provider(
     .map_err(|e| format!("供应商更新任务执行失败: {e}"))?
 }
 
+/// 交换创建的是待启用副本；即使目标列表为空，也不能自动写客户端配置或改变当前项。
+#[tauri::command]
+pub async fn add_provider_copy(
+    app_handle: tauri::AppHandle,
+    app: String,
+    provider: Provider,
+) -> Result<bool, String> {
+    let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app_handle.state::<AppState>();
+        ProviderService::add_without_switching(state.inner(), app_type, provider)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| format!("供应商副本创建任务失败: {e}"))?
+}
+
 /// 供应商编辑器底部 JSON 的显示内容：切到这个供应商之后配置文件会是什么样。
 /// `settingsConfig` 是供应商的行（新增时传空对象）。
 /// Codex draft metadata wins over the stored provider's metadata when supplied.

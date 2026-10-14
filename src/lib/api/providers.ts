@@ -71,6 +71,35 @@ export interface ClaudeDesktopDefaultRoute {
 }
 
 export const providersApi = {
+  /** 单条交换明确指定目标环境；undefined 表示本机，不能随页面的运行环境自动转发。 */
+  async listExchangeTarget(
+    appId: AppId,
+    targetId?: string,
+  ): Promise<Record<string, Provider>> {
+    if (!targetId) return providersApi.listLocal(appId);
+    const { remoteApi } = await import("./remote");
+    return remoteApi.invokeProviderTarget(targetId, "provider.list", {
+      app: appId,
+    });
+  },
+  /** 创建独立待启用副本，源记录不参与写入；空列表也不自动启用。 */
+  async addExchangeCopy(
+    provider: Provider,
+    appId: AppId,
+    targetId?: string,
+  ): Promise<boolean> {
+    if (!targetId)
+      return localInvoke<boolean>("add_provider_copy", {
+        provider,
+        app: appId,
+      });
+    const { remoteApi } = await import("./remote");
+    return remoteApi.invokeProviderTarget(targetId, "provider.add", {
+      provider,
+      app: appId,
+      addToLive: false,
+    });
+  },
   async getAll(appId: AppId): Promise<Record<string, Provider>> {
     return await appInvoke(
       "get_providers",

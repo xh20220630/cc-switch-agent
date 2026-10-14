@@ -109,3 +109,27 @@ fn disk_headless_state_persists_without_constructing_desktop_services() {
         .join("cc-switch.db")
         .is_file());
 }
+
+#[test]
+fn exchange_copy_into_empty_target_does_not_select_or_write_live() {
+    let home = tempfile::tempdir().expect("创建隔离 HOME");
+    let state = HeadlessState::memory(home.path()).expect("创建无界面状态");
+    // 交换即使成为目标第一条记录也只是待启用副本，不能影响 CLI 的运行配置。
+    ProviderService::add(
+        &state,
+        "claude",
+        provider("copy", "Copy", "copy-key"),
+        false,
+    )
+    .expect("新增交换副本");
+    assert!(ProviderService::current(&state, "claude")
+        .unwrap()
+        .is_empty());
+    assert!(!home.path().join(".claude/settings.json").exists());
+    assert!(ProviderService::list(&state, "claude")
+        .unwrap()
+        .contains_key("copy"));
+    ProviderService::switch(&state, "claude", "copy").expect("用户之后主动启用副本");
+    assert_eq!(ProviderService::current(&state, "claude").unwrap(), "copy");
+    assert!(home.path().join(".claude/settings.json").exists());
+}

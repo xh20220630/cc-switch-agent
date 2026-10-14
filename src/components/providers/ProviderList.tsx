@@ -72,6 +72,8 @@ interface ProviderListProps {
   onDisableOmo?: () => void;
   onDisableOmoSlim?: () => void;
   onDuplicate: (provider: Provider) => void;
+  /** 所有模式分区的供应商行共用交换回调，避免只在当前项上提供入口。 */
+  onExchange?: (provider: Provider) => void;
   onConfigureUsage?: (provider: Provider) => void;
   onOpenWebsite: (url: string) => void;
   onOpenTerminal?: (provider: Provider) => void;
@@ -97,6 +99,7 @@ export function ProviderList({
   onDisableOmo,
   onDisableOmoSlim,
   onDuplicate,
+  onExchange,
   onConfigureUsage,
   onOpenWebsite,
   onOpenTerminal,
@@ -439,6 +442,7 @@ export function ProviderList({
       onEdit={onEdit}
       onDelete={onDelete}
       onDuplicate={onDuplicate}
+      onExchange={onExchange}
       onConfigureUsage={
         onConfigureUsage ? (item) => onConfigureUsage(item) : () => undefined
       }
@@ -581,6 +585,7 @@ interface SortableProviderCardProps {
   onEdit: (provider: Provider) => void;
   onDelete: (provider: Provider) => void;
   onDuplicate: (provider: Provider) => void;
+  onExchange?: (provider: Provider) => void;
   onConfigureUsage: (provider: Provider) => void;
   onOpenWebsite: (url: string) => void;
   onOpenTerminal?: (provider: Provider) => void;

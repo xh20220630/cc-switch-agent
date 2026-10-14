@@ -39,6 +39,7 @@ vi.mock("@/components/providers/ProviderList", () => ({
     onSwitch,
     onEdit,
     onDuplicate,
+    onExchange,
     onConfigureUsage,
     onOpenWebsite,
     onCreate,
@@ -54,6 +55,9 @@ vi.mock("@/components/providers/ProviderList", () => ({
       <button onClick={() => onEdit(providers[currentProviderId])}>edit</button>
       <button onClick={() => onDuplicate(providers[currentProviderId])}>
         duplicate
+      </button>
+      <button onClick={() => onExchange(providers[currentProviderId])}>
+        exchange
       </button>
       <button onClick={() => onConfigureUsage(providers[currentProviderId])}>
         usage
@@ -156,10 +160,16 @@ vi.mock("@/components/remote/RuntimeTargetSwitcher", () => ({
   ),
 }));
 
-// 双向同步弹窗的数据和目标上下文由其组件测试覆盖；这里确认新增页头按钮仍能打开它。
-vi.mock("@/components/providers/ProviderSyncDialog", () => ({
-  ProviderSyncDialog: ({ open }: { open: boolean }) =>
-    open ? <div data-testid="provider-sync-dialog" /> : null,
+// 交换的数据转换由组件测试覆盖；集成测试验证行入口固定源供应商与应用。
+vi.mock("@/components/providers/ProviderExchangeDialog", () => ({
+  ProviderExchangeDialog: ({ source }: any) =>
+    source ? (
+      <div
+        data-testid="provider-exchange-dialog"
+        data-app={source.appId}
+        data-provider-id={source.provider.id}
+      />
+    ) : null,
 }));
 
 // 设置页要 ThemeProvider，这里只看导航进去时发生了什么
@@ -216,6 +226,26 @@ describe("App integration with MSW", () => {
     localStorage.removeItem("cc-switch-last-view");
     localStorage.removeItem("cc-switch-last-app");
   });
+
+  it("opens exchange from a provider row with its source app and provider", async () => {
+    const { default: App } = await import("@/App");
+    renderApp(App);
+    await waitFor(() =>
+      expect(screen.getByTestId("provider-list")).toHaveTextContent("claude-1"),
+    );
+    fireEvent.click(screen.getByText("exchange"));
+    expect(screen.getByTestId("provider-exchange-dialog")).toHaveAttribute(
+      "data-app",
+      "claude",
+    );
+    expect(screen.getByTestId("provider-exchange-dialog")).toHaveAttribute(
+      "data-provider-id",
+      "claude-1",
+    );
+    expect(
+      screen.queryByRole("button", { name: "provider.sync.title" }),
+    ).not.toBeInTheDocument();
+  }, 15_000);
 
   it("covers basic provider flows via real hooks", async () => {
     const { default: App } = await import("@/App");

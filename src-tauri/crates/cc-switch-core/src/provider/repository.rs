@@ -49,8 +49,9 @@ pub(crate) fn add(
     state: &HeadlessState,
     app: &str,
     mut provider: ProviderRecord,
+    select_if_first: bool,
 ) -> Result<bool, CoreError> {
-    // 首项判定、主表写入与 endpoint 写入必须处于同一事务，避免出现半初始化 Provider。
+    // 首项判定与新增处于同一事务；交换的待启用副本明确关闭首项选择，不改变已有当前项。
     validate_provider(app, &provider)?;
     let mut connection = state.connection()?;
     let transaction = connection.transaction()?;
@@ -59,7 +60,12 @@ pub(crate) fn add(
     if provider.sort_index.is_none() {
         provider.sort_index = Some(next_sort_index(&transaction, app)?);
     }
-    insert_provider(&transaction, app, &provider, current.is_none())?;
+    insert_provider(
+        &transaction,
+        app,
+        &provider,
+        select_if_first && current.is_none(),
+    )?;
     replace_endpoints(&transaction, app, &provider)?;
     transaction.commit()?;
     Ok(true)

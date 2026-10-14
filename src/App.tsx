@@ -16,7 +16,6 @@ import {
   MoreHorizontal,
   Plus,
   Search,
-  ArrowLeftRight,
 } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { Provider, VisibleApps } from "@/types";
@@ -88,7 +87,10 @@ import {
   isNativeOpencodeConfig,
 } from "@/components/providers/forms/helpers/opencodeFormUtils";
 import { EditProviderDialog } from "@/components/providers/EditProviderDialog";
-import { ProviderSyncDialog } from "@/components/providers/ProviderSyncDialog";
+import {
+  ProviderExchangeDialog,
+  type ProviderExchangeSource,
+} from "@/components/providers/ProviderExchangeDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { discardUnsavedChanges, hasUnsavedChanges } from "@/lib/unsavedChanges";
 import { SettingsPage } from "@/components/settings/SettingsPage";
@@ -180,8 +182,9 @@ function App() {
     PROMPT_APP_IDS.includes(sharedFeatureApp) ? sharedFeatureApp : "claude",
   );
   const [isAddOpen, setIsAddOpen] = useState(false);
-  // 同步弹窗沿用 fork 的双向供应商同步，导航布局使用上游侧栏。
-  const [isSyncOpen, setIsSyncOpen] = useState(false);
+  // 从每条供应商行发起交换，打开时固定源应用、主机和配置快照。
+  const [exchangeSource, setExchangeSource] =
+    useState<ProviderExchangeSource | null>(null);
   // 供应商搜索面板：页头按钮和 ⌘F 都能打开；换应用或离开供应商页就收起
   const [providerSearchOpen, setProviderSearchOpen] = useState(false);
   useEffect(() => {
@@ -1224,19 +1227,6 @@ function App() {
               </HoverTip>
             )}
           {currentView === "providers" && (
-            // 双向同步沿用 fork 的弹窗；放在新增按钮前，随当前应用读取和复制供应商。
-            <HoverTip content={t("provider.sync.title")}>
-              <Button
-                variant="quiet"
-                size="icon-compact"
-                aria-label={t("provider.sync.title")}
-                onClick={() => setIsSyncOpen(true)}
-              >
-                <ArrowLeftRight className="h-4 w-4" />
-              </Button>
-            </HoverTip>
-          )}
-          {currentView === "providers" && (
             <Button
               variant="solid"
               size="regular"
@@ -1300,6 +1290,12 @@ function App() {
     onDelete: (provider: Provider) =>
       setConfirmAction({ provider, action: "delete" }),
     onDuplicate: handleDuplicateProvider,
+    onExchange: (provider: Provider) =>
+      setExchangeSource({
+        provider: deepClone(provider),
+        appId: activeApp,
+        targetId: scope[0] === "local" ? undefined : (scope[1] ?? undefined),
+      }),
     onConfigureUsage: setUsageProvider,
     onOpenWebsite: handleOpenWebsite,
     onOpenTerminal: activeApp === "claude" ? handleOpenTerminal : undefined,
@@ -1640,10 +1636,11 @@ function App() {
           modeView={formModeView}
         />
 
-        <ProviderSyncDialog
-          open={isSyncOpen}
-          onOpenChange={setIsSyncOpen}
-          appId={activeApp}
+        <ProviderExchangeDialog
+          source={exchangeSource}
+          onOpenChange={(open) => {
+            if (!open) setExchangeSource(null);
+          }}
         />
 
         <EditProviderDialog

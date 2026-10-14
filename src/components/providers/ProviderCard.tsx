@@ -55,6 +55,8 @@ interface ProviderCardProps {
   onConfigureUsage: (provider: Provider) => void;
   onOpenWebsite: (url: string) => void;
   onDuplicate?: (provider: Provider) => void;
+  /** 行内交换传出当前供应商，由页面固定源主机后打开弹窗。 */
+  onExchange?: (provider: Provider) => void;
   onTest?: (provider: Provider) => void;
   onOpenTerminal?: (provider: Provider) => void;
   isTesting?: boolean;
@@ -169,6 +171,7 @@ export function ProviderCard({
   onConfigureUsage,
   onOpenWebsite,
   onDuplicate,
+  onExchange,
   onTest,
   onOpenTerminal,
   isTesting,
@@ -523,6 +526,7 @@ export function ProviderCard({
             onEdit={() => onEdit(provider)}
             onDelete={() => onDelete(provider)}
             onDuplicate={onDuplicate ? () => onDuplicate(provider) : undefined}
+            onExchange={onExchange ? () => onExchange(provider) : undefined}
             onTest={
               // 连通检测对第三方/自定义/Copilot/Codex-OAuth 供应商开放。官方供应商一律不给：
               // 它们 base_url 故意留空、走客户端默认/OAuth 端点，没有可靠的探测目标。

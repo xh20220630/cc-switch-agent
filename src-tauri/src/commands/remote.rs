@@ -267,6 +267,24 @@ pub async fn remote_invoke(
     result
 }
 
+/// 交换弹窗通过本机边界访问指定机器，目标选择不影响当前页面和本地代理的运行环境。
+#[tauri::command]
+pub async fn remote_invoke_provider_target(
+    app_handle: tauri::AppHandle,
+    #[allow(non_snake_case)] targetId: String,
+    command: String,
+    args: Value,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app_handle
+            .state::<RemoteRuntimeState>()
+            .invoke_provider_target(&targetId, &command, args)
+            .map_err(serialize_error)
+    })
+    .await
+    .map_err(|error| format!("供应商交换远程任务失败: {error}"))?
+}
+
 /// 把远程切换的 provider 注册进桌面 DB 并设为"远程 current"，供本地代理转发。
 /// 与本地 current 完全隔离：不调用 set_current_provider，避免覆盖本地选择。
 async fn sync_provider_to_local_proxy(

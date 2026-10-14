@@ -263,6 +263,53 @@ impl RemoteRuntimeState {
         result.map_err(RemoteRuntimeError::Ssh)
     }
 
+    /// 供应商交换只访问明确指定的机器，不切换全局运行目标，也不创建代理隧道。
+    /// 当前在线机器复用现有会话并沿用 generation 校验；其他机器使用短生命周期 SSH 会话。
+    /// 白名单只允许读取列表和新增副本，不能通过此入口切换、删除或改写源供应商。
+    pub fn invoke_provider_target(
+        &self,
+        target_id: &str,
+        command: &str,
+        mut args: serde_json::Value,
+    ) -> Result<serde_json::Value, RemoteRuntimeError> {
+        if !matches!(command, "provider.list" | "provider.add") {
+            return Err(RemoteCapabilityError::CommandNotExposed(command.to_string()).into());
+        }
+        if command == "provider.add" {
+            // 交换入口在后端固定为待启用副本，不能依赖前端是否传了 addToLive。
+            let object = args
+                .as_object_mut()
+                .ok_or_else(|| RemoteClientError::Remote {
+                    code: "INVALID_ARGUMENT".to_string(),
+                    message: "供应商交换参数必须是对象".to_string(),
+                })?;
+            object.insert("addToLive".to_string(), serde_json::Value::Bool(false));
+        }
+        let snapshot = self.snapshot()?;
+        if snapshot.status == RemoteConnectionStatus::Online
+            && snapshot.active_target_id.as_deref() == Some(target_id)
+        {
+            return self.invoke_remote(snapshot.generation, command, args);
+        }
+        let mut target = self
+            .list_targets()?
+            .into_iter()
+            .find(|target| target.id == target_id)
+            .ok_or_else(|| RemoteRuntimeError::TargetNotFound(target_id.to_string()))?;
+        target.password = self.credentials.get(target_id)?;
+        let session = OpenSshSession::connect_with_forward(&target, None)?;
+        let registry = CommandCapabilityRegistry::remote_supported();
+        let capability = registry.require(command)?;
+        session
+            .invoke(
+                &uuid::Uuid::new_v4().to_string(),
+                command,
+                args,
+                capability.timeout_ms,
+            )
+            .map_err(RemoteRuntimeError::Ssh)
+    }
+
     fn require_generation(&self, expected: u64) -> Result<(), RemoteRuntimeError> {
         let snapshot = self.lock_snapshot()?;
         if snapshot.generation != expected {
@@ -411,6 +458,104 @@ mod generation_tests {
             .expect_err("旧 generation 必须在发送前被拒绝");
         assert_eq!(error.code(), "STALE_RUNTIME");
         assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn provider_exchange_reuses_selected_session_without_switching_runtime() {
+        let (started_sender, started_receiver) = mpsc::channel();
+        let (release_sender, release_receiver) = mpsc::channel();
+        let (runtime, calls) = connected_runtime(BlockingSession {
+            calls: Arc::new(AtomicUsize::new(0)),
+            started: started_sender,
+            release: Mutex::new(release_receiver),
+        });
+        let invoking = Arc::clone(&runtime);
+        let task = std::thread::spawn(move || {
+            invoking.invoke_provider_target(
+                "test-target",
+                "provider.list",
+                json!({ "app": "codex" }),
+            )
+        });
+        started_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("指定目标收到请求");
+        release_sender.send(()).expect("释放响应");
+        task.join().expect("等待交换读取").expect("读取成功");
+        let snapshot = runtime.snapshot().expect("读取运行环境");
+        assert_eq!(snapshot.generation, 7);
+        assert_eq!(snapshot.active_target_id.as_deref(), Some("test-target"));
+        assert_eq!(snapshot.status, RemoteConnectionStatus::Online);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn provider_exchange_rejects_switch_delete_and_unknown_target_before_network() {
+        let (started_sender, _started_receiver) = mpsc::channel();
+        let (_release_sender, release_receiver) = mpsc::channel();
+        let (runtime, calls) = connected_runtime(BlockingSession {
+            calls: Arc::new(AtomicUsize::new(0)),
+            started: started_sender,
+            release: Mutex::new(release_receiver),
+        });
+        // 不开放源记录变更；未保存的机器不能偷偷使用当前在线机器的会话。
+        for command in ["provider.switch", "provider.delete", "provider.update"] {
+            assert_eq!(
+                runtime
+                    .invoke_provider_target("test-target", command, json!({}))
+                    .unwrap_err()
+                    .code(),
+                "COMMAND_NOT_EXPOSED"
+            );
+        }
+        assert_eq!(
+            runtime
+                .invoke_provider_target("missing-target", "provider.list", json!({}))
+                .unwrap_err()
+                .code(),
+            "REMOTE_TARGET_NOT_FOUND"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert_eq!(runtime.snapshot().unwrap().generation, 7);
+    }
+
+    #[test]
+    fn provider_exchange_forces_inactive_copy_even_when_caller_requests_activation() {
+        struct EchoSession;
+        impl RuntimeCommandSession for EchoSession {
+            fn invoke(
+                &self,
+                _request_id: &str,
+                _command: &str,
+                args: serde_json::Value,
+                _timeout_ms: u64,
+            ) -> Result<serde_json::Value, RemoteSshError> {
+                Ok(args)
+            }
+        }
+        let home = tempfile::tempdir().expect("创建隔离运行环境");
+        let runtime = RemoteRuntimeState::with_credentials(
+            RemoteTargetStore::at(home.path().join("targets.json")),
+            RemoteCredentialStore::at(home.path().join("credentials.json")),
+        )
+        .unwrap();
+        runtime.install_test_session(7, Box::new(EchoSession));
+        // 后端必须覆盖前端的启用请求；不合法参数也应在发送前返回可识别错误码。
+        let args = runtime
+            .invoke_provider_target(
+                "test-target",
+                "provider.add",
+                json!({ "app": "codex", "addToLive": true }),
+            )
+            .unwrap();
+        assert_eq!(args["addToLive"], false);
+        assert_eq!(
+            runtime
+                .invoke_provider_target("test-target", "provider.add", json!([]))
+                .unwrap_err()
+                .code(),
+            "INVALID_ARGUMENT"
+        );
     }
 
     #[test]

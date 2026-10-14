@@ -24,18 +24,18 @@ impl ProviderService {
         repository::current(state, app)
     }
 
-    /// 新增 Provider；若它成为首个当前项，则同步建立 live 配置以维持数据库与 CLI 一致。
+    /// 正常新增保持首项自动启用；交换传 false 时只存副本，目标为空也不能改当前项或 live。
     pub fn add(
         state: &HeadlessState,
         app: &str,
         provider: ProviderRecord,
-        _add_to_live: bool,
+        add_to_live: bool,
     ) -> Result<bool, CoreError> {
         let had_current = !repository::current(state, app)?.is_empty();
         let projected_provider = provider.clone();
-        let added = repository::add(state, app, provider)?;
-        // 保持既有首项行为：独占模式首个 Provider 必须立即形成 live 配置。
-        if !had_current && should_project_implicitly(state, app) {
+        let added = repository::add(state, app, provider, add_to_live)?;
+        // 待启用副本不能成为首项，否则交换会意外改变远端 CLI 的配置。
+        if add_to_live && !had_current && should_project_implicitly(state, app) {
             let context = live_context(state);
             live::project_provider(&context, app, &projected_provider)?;
         }

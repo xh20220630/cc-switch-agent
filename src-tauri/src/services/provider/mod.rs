@@ -675,6 +675,32 @@ mod tests {
 
     #[test]
     #[serial]
+    fn exchange_copy_into_empty_desktop_target_stays_inactive() {
+        with_test_home(|state, home| {
+            // 交换复用待启用保存路径，空 Codex 列表也不能创建 auth/config 或当前指针。
+            let provider = codex_provider_with_usage(
+                "exchange-copy",
+                "https://api.example.com/v1",
+                "copy-key",
+                None,
+                None,
+                None,
+            );
+            ProviderService::add_without_switching(state, AppType::Codex, provider)
+                .expect("保存待启用副本");
+            assert!(state.db.get_current_provider("codex").unwrap().is_none());
+            assert!(state
+                .db
+                .get_provider_by_id("exchange-copy", "codex")
+                .unwrap()
+                .is_some());
+            assert!(!home.join(".codex/config.toml").exists());
+            assert!(!home.join(".codex/auth.json").exists());
+        });
+    }
+
+    #[test]
+    #[serial]
     fn update_preserves_usage_credentials_that_only_match_previous_config() {
         with_test_home(|state, _| {
             let provider = codex_provider_with_usage(
