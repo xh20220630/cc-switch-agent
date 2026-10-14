@@ -414,6 +414,180 @@ fn codex_rebuild_keeps_backup_when_import_fails_after_reset() {
 }
 
 #[test]
+fn codex_sync_preserves_first_token_and_backfills_legacy_timing_without_rebilling() {
+    let home = tempfile::tempdir().expect("隔离 HOME");
+    let sessions = home.path().join(".codex/sessions");
+    std::fs::create_dir_all(&sessions).expect("建立 sessions");
+    let first_ms = chrono::DateTime::parse_from_rfc3339("2026-07-30T10:00:01Z")
+        .expect("首字时刻")
+        .timestamp_millis();
+    let usage =
+        serde_json::json!({ "input_tokens": 100, "cached_input_tokens": 0, "output_tokens": 64 });
+    let events = [
+        serde_json::json!({ "type": "session_meta", "timestamp": "2026-07-30T10:00:00Z", "payload": { "id": "timed-thread" } }),
+        serde_json::json!({ "type": "turn_context", "timestamp": "2026-07-30T10:00:00Z", "payload": { "model": "gpt-5" } }),
+        serde_json::json!({ "type": "response_item", "timestamp": "2026-07-30T10:00:03Z", "payload": { "type": "message", "role": "assistant" } }),
+        serde_json::json!({ "type": "event_msg", "timestamp": "2026-07-30T10:00:03Z", "payload": { "type": "item_completed", "item": { "type": "AgentMessage" }, "started_at_ms": first_ms } }),
+        serde_json::json!({ "type": "token_usage_record", "timestamp": "2026-07-30T10:00:04Z", "payload": { "usage": usage } }),
+        // token_count 晚写四秒，不应把这段额外等待算进生成时间。
+        serde_json::json!({ "type": "event_msg", "timestamp": "2026-07-30T10:00:08Z", "payload": { "type": "token_count", "info": { "total_token_usage": usage, "last_token_usage": usage } } }),
+    ];
+    std::fs::write(
+        sessions.join("timed.jsonl"),
+        events
+            .iter()
+            .map(serde_json::Value::to_string)
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+    .expect("写会话");
+    let state = HeadlessState::open(home.path()).expect("目标数据库");
+    UsageService::sync_sessions(&state, &OperationCancellation::active()).expect("导入计时");
+    let id = "codex_session:timed-thread:1";
+    let detail = UsageService::detail(&state, id)
+        .expect("查询")
+        .expect("存在");
+    assert_eq!(detail.latency_ms, 4_000);
+    assert_eq!(detail.first_token_ms, Some(1_000));
+    state
+        .with_connection(|connection| {
+            connection.execute(
+                "UPDATE proxy_request_logs SET latency_ms = 0, first_token_ms = NULL,
+            total_cost_usd = '0.55', input_cost_usd = '0.30' WHERE request_id = ?1",
+                [id],
+            )?;
+            connection.execute(
+                "UPDATE settings SET value = '0' WHERE key = 'agent_codex_usage_timing_revision'",
+                [],
+            )?;
+            Ok(())
+        })
+        .expect("模拟旧 Agent 已同步且无计时的数据");
+    UsageService::sync_sessions(&state, &OperationCancellation::active()).expect("回填未变化文件");
+    let detail = UsageService::detail(&state, id)
+        .expect("查询")
+        .expect("存在");
+    assert_eq!(detail.latency_ms, 4_000);
+    assert_eq!(detail.first_token_ms, Some(1_000));
+    assert_eq!(detail.output_tokens, 64);
+    assert_eq!(detail.total_cost_usd, "0.55");
+    assert_eq!(detail.input_cost_usd, "0.30");
+    assert_eq!(codex_usage_count(&state), 1);
+    let unchanged = UsageService::sync_sessions(&state, &OperationCancellation::active())
+        .expect("恢复增量同步");
+    assert_eq!((unchanged.imported, unchanged.skipped), (0, 0));
+}
+
+/// token_count 的心跳不能把请求起点挪晚，也不能凭空生成一条用量记录。
+#[test]
+fn codex_timing_ignores_zero_and_repeated_token_count_heartbeats() {
+    let home = tempfile::tempdir().expect("隔离 HOME");
+    let sessions = home.path().join(".codex/sessions");
+    std::fs::create_dir_all(&sessions).expect("建立 sessions");
+    let event = |at: u32, kind: &str, payload: serde_json::Value| {
+        serde_json::json!({
+            "timestamp": format!("2026-07-30T10:00:{at:02}Z"), "type": kind, "payload": payload
+        })
+    };
+    let usage = |input, output| {
+        serde_json::json!({ "type": "token_count", "info": {
+            "total_token_usage": { "input_tokens": input, "output_tokens": output }
+        }})
+    };
+    let events = [
+        event(0, "session_meta", serde_json::json!({ "id": "heartbeat" })),
+        event(0, "turn_context", serde_json::json!({ "model": "gpt-5" })),
+        event(1, "event_msg", usage(0, 0)),
+        event(
+            3,
+            "response_item",
+            serde_json::json!({ "type": "reasoning" }),
+        ),
+        event(5, "event_msg", usage(100, 20)),
+        event(6, "turn_context", serde_json::json!({ "model": "gpt-5" })),
+        event(7, "event_msg", usage(100, 20)),
+        event(
+            9,
+            "response_item",
+            serde_json::json!({ "type": "reasoning" }),
+        ),
+        event(11, "event_msg", usage(200, 40)),
+    ];
+    std::fs::write(
+        sessions.join("heartbeat.jsonl"),
+        events
+            .iter()
+            .map(serde_json::Value::to_string)
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+    .expect("写入心跳序列");
+    let state = HeadlessState::open(home.path()).expect("目标数据库");
+    UsageService::sync_sessions(&state, &OperationCancellation::active()).expect("同步");
+    let logs = UsageService::logs(&state, Default::default(), 0, 20).expect("日志");
+    assert_eq!(logs.total, 2);
+    assert!(logs
+        .data
+        .iter()
+        .all(|log| log.latency_ms == 5_000 && log.output_tokens == 20));
+}
+
+/// 多块回复固定首次起点；旧数据补计时时保留已计算的费用和 token 数。
+#[test]
+fn claude_sync_backfills_timing_without_clearing_existing_costs() {
+    let home = tempfile::tempdir().expect("隔离 HOME");
+    let projects = home.path().join(".claude/projects/demo");
+    std::fs::create_dir_all(&projects).expect("建立 projects");
+    let events = [
+        serde_json::json!({ "type": "user", "sessionId": "claude-timed", "timestamp": "2026-07-30T10:00:00Z" }),
+        serde_json::json!({ "type": "assistant", "sessionId": "claude-timed", "timestamp": "2026-07-30T10:00:04Z",
+            "apiBlockIndex": 0, "thinkingDurationMs": 3_000,
+            "message": { "id": "reply", "model": "claude-test", "content": [{ "type": "thinking" }],
+                "usage": { "input_tokens": 20, "output_tokens": 40 } } }),
+    ];
+    std::fs::write(
+        projects.join("timed.jsonl"),
+        events
+            .iter()
+            .map(serde_json::Value::to_string)
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+    .expect("写会话");
+    let state = HeadlessState::open(home.path()).expect("目标数据库");
+    UsageService::sync_sessions(&state, &OperationCancellation::active()).expect("导入计时");
+    let id = "claude_session:claude-timed:reply";
+    let detail = UsageService::detail(&state, id)
+        .expect("查询")
+        .expect("存在");
+    assert_eq!(detail.latency_ms, 4_000);
+    assert_eq!(detail.first_token_ms, Some(1_000));
+    state
+        .with_connection(|connection| {
+            connection.execute(
+                "UPDATE proxy_request_logs SET latency_ms = 0, first_token_ms = NULL,
+            total_cost_usd = '0.55', input_cost_usd = '0.30' WHERE request_id = ?1",
+                [id],
+            )?;
+            connection.execute(
+                "UPDATE settings SET value = '0' WHERE key = 'agent_session_usage_timing_revision'",
+                [],
+            )?;
+            Ok(())
+        })
+        .expect("模拟旧版本数据");
+    UsageService::sync_sessions(&state, &OperationCancellation::active()).expect("回填历史计时");
+    let detail = UsageService::detail(&state, id)
+        .expect("查询")
+        .expect("存在");
+    assert_eq!(detail.latency_ms, 4_000);
+    assert_eq!(detail.first_token_ms, Some(1_000));
+    assert_eq!(detail.output_tokens, 40);
+    assert_eq!(detail.total_cost_usd, "0.55");
+    assert_eq!(detail.input_cost_usd, "0.30");
+}
+
+#[test]
 fn session_sync_imports_codex_usage_from_explicit_target_home() {
     let home = tempfile::tempdir().expect("创建临时 HOME");
     let session_dir = home

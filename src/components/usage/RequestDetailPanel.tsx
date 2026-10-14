@@ -19,12 +19,10 @@ import {
 import { cn } from "@/lib/utils";
 import { extractErrorMessage } from "@/utils/errorUtils";
 import {
-  SPEED_ESTIMATE_MIN_OUTPUT_TOKENS,
-  SPEED_MIN_OUTPUT_TOKENS,
   fmtInt,
-  formatEstimatedTokensPerSecond,
-  formatOutputTokensPerSecond,
+  formatTokensPerSecond,
   getLocaleFromLanguage,
+  getRequestTimingMetrics,
   getResolvedLang,
   parseFiniteNumber,
 } from "./format";
@@ -95,10 +93,12 @@ function useDetailSections(request: RequestLog) {
   const unpriced = isUnpricedUsage(request);
   const multiplier = parseFiniteNumber(request.costMultiplier);
   const isProxy = !request.dataSource || request.dataSource === "proxy";
-  const tps = formatOutputTokensPerSecond(request);
-  const estimatedTps = formatEstimatedTokensPerSecond(request);
-  const latency = parseFiniteNumber(request.latencyMs);
-  const firstToken = parseFiniteNumber(request.firstTokenMs);
+  // 详情与列表共用计时口径，避免短回复在列表有速度、点开详情却显示「输出过少」。
+  const timing = getRequestTimingMetrics(request);
+  const tps = formatTokensPerSecond(timing.generationTps);
+  const totalTps = formatTokensPerSecond(timing.totalTps);
+  const latency = timing.totalMs;
+  const firstToken = timing.firstTokenMs;
 
   const basic: DetailRow[] = [
     {
@@ -225,95 +225,59 @@ function useDetailSections(request: RequestLog) {
       : `$${parseFiniteNumber(request.totalCostUsd)?.toFixed(6) ?? "--"}`,
   });
 
-  let performance: DetailRow[];
-  if (!isProxy) {
-    // 会话日志的耗时和首字是导入时按日志时间戳估的（耗时 0 = 没估出来）
-    if (latency == null || latency <= 0) {
-      performance = [
-        {
-          key: "speed",
-          label: t("usage.speed"),
-          value: t("usage.detail.noTimingSession"),
-          muted: true,
-        },
-      ];
-    } else {
-      performance = [
-        estimatedTps != null
-          ? {
-              key: "speed",
-              label: t("usage.speed"),
-              value: t("usage.speedEstimatedValue", { value: estimatedTps }),
-            }
-          : {
-              key: "speed",
-              label: t("usage.speed"),
-              value:
-                request.outputTokens < SPEED_ESTIMATE_MIN_OUTPUT_TOKENS
-                  ? t("usage.detail.speedEstimateTooFew")
-                  : "—",
-              muted: true,
-            },
-        {
-          key: "duration",
-          label: t("usage.detail.durationEstimated"),
-          value: `${(latency / 1000).toFixed(1)}s`,
-          title: `${fmtInt(latency, locale)} ms`,
-        },
-      ];
-      // 首字也是按时间戳推出来的；第一块不是思考、或 Codex 一开头就调工具时推不出来
-      if (firstToken != null) {
-        performance.splice(1, 0, {
-          key: "ttft",
-          label: t("usage.detail.firstTokenEstimated"),
-          value: `${(firstToken / 1000).toFixed(1)}s`,
+  // 两种速度分别展示；没有首字不等于没有速度，有有效总耗时仍可算全程。
+  const speedValue = (value: string | null, missing: string) =>
+    value == null
+      ? missing
+      : t(isProxy ? "usage.speedValue" : "usage.speedEstimatedValue", {
+          value,
         });
-      }
-    }
-  } else {
-    const speedRow: DetailRow =
-      tps != null
-        ? {
-            key: "speed",
-            label: t("usage.speed"),
-            value: t("usage.speedValue", { value: tps }),
-          }
-        : firstToken == null
-          ? {
-              key: "speed",
-              label: t("usage.speed"),
-              value: t("usage.detail.noFirstToken"),
-              muted: true,
-            }
-          : request.outputTokens < SPEED_MIN_OUTPUT_TOKENS
-            ? {
-                key: "speed",
-                label: t("usage.speed"),
-                value: t("usage.detail.speedTooFew"),
-                muted: true,
-              }
-            : {
-                key: "speed",
-                label: t("usage.speed"),
-                value: "—",
-                muted: true,
-              };
-    performance = [speedRow];
-    if (firstToken != null) {
-      performance.push({
-        key: "ttft",
-        label: t("usage.detail.firstToken"),
-        value: `${(firstToken / 1000).toFixed(1)}s`,
-      });
-    }
-    if (latency != null) {
-      performance.push({
-        key: "duration",
-        label: t("usage.detail.duration"),
-        value: `${(latency / 1000).toFixed(1)}s`,
-        title: `${fmtInt(latency, locale)} ms`,
-      });
-    }
+  const performance: DetailRow[] = [
+    {
+      key: "speed",
+      label: `${t("usage.speed")} · ${t("usage.afterFirstToken")}`,
+      value: speedValue(
+        tps,
+        firstToken == null ? t("usage.detail.noFirstToken") : "—",
+      ),
+      muted: tps == null,
+      title: t("usage.requestSpeedHelp"),
+    },
+    {
+      key: "full-speed",
+      label: `${t("usage.speed")} · ${t("usage.endToEnd")}`,
+      value: speedValue(
+        totalTps,
+        latency != null
+          ? "—"
+          : !isProxy
+            ? t("usage.detail.noTimingSession")
+            : t("usage.requestTimingMissing"),
+      ),
+      muted: totalTps == null,
+      title: t("usage.requestSpeedHelp"),
+    },
+  ];
+  if (firstToken != null) {
+    performance.push({
+      key: "ttft",
+      label: t(
+        isProxy
+          ? "usage.detail.firstToken"
+          : "usage.detail.firstTokenEstimated",
+      ),
+      value: `${(firstToken / 1000).toFixed(1)}s`,
+    });
+  }
+  if (latency != null) {
+    performance.push({
+      key: "duration",
+      label: t(
+        isProxy ? "usage.detail.duration" : "usage.detail.durationEstimated",
+      ),
+      value: `${(latency / 1000).toFixed(1)}s`,
+      title: `${fmtInt(latency, locale)} ms`,
+    });
   }
 
   return { basic, tokens, cost, performance };

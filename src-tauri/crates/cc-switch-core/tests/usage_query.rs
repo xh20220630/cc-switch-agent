@@ -1,6 +1,95 @@
 use cc_switch_core::{HeadlessState, LogFilters, UsageScope, UsageService};
 use rusqlite::params;
 
+/// 全量计时统计不得跟随页码变化；短回复、缺首字与旧 duration 字段各有独立口径。
+#[test]
+fn request_log_speed_summary_covers_all_pages_and_obeys_filters() {
+    let home = tempfile::tempdir().expect("隔离 HOME");
+    let state = HeadlessState::memory(home.path()).expect("隔离数据库");
+    state
+        .with_connection(|connection| {
+            let cases = [
+                ("fast", 64, 2_400, Some(1_900), None, "proxy", 200),
+                ("slow", 200, 11_000, Some(1_000), None, "codex_session", 200),
+                ("nonstream", 20, 2_000, None, None, "proxy", 200),
+                ("untimed", 9_000, 0, None, None, "codex_session", 200),
+                ("invalid-first", 10, 1_000, Some(5_000), None, "proxy", 500),
+                ("legacy", 30, 0, None, Some(3_000), "proxy", 200),
+                ("zero", 0, 1_000, None, None, "proxy", 200),
+            ];
+            for (index, (id, output, latency, first, duration, source, status)) in
+                cases.iter().enumerate()
+            {
+                insert_log(
+                    connection,
+                    id,
+                    "p-speed",
+                    "codex",
+                    "gpt-5",
+                    100,
+                    *output,
+                    0,
+                    0,
+                    1,
+                    "0",
+                    *status,
+                    1_700_000_000 + index as i64,
+                    source,
+                )?;
+                connection.execute(
+                    "UPDATE proxy_request_logs SET latency_ms = ?2,
+                first_token_ms = ?3, duration_ms = ?4 WHERE request_id = ?1",
+                    params![id, latency, first, duration],
+                )?;
+            }
+            Ok(())
+        })
+        .expect("准备不同计时形态");
+    let first = UsageService::logs(&state, LogFilters::default(), 0, 2).expect("第一页");
+    let last = UsageService::logs(&state, LogFilters::default(), 3, 2).expect("最后页");
+    assert_eq!(first.total, 7);
+    assert_eq!(first.data.len(), 2);
+    assert_eq!(first.speed_summary, last.speed_summary);
+    let summary = first.speed_summary;
+    assert_eq!(summary.timed_request_count, 5);
+    assert_eq!(summary.output_tokens, 324);
+    assert_eq!(summary.total_duration_ms, 19_400);
+    assert_eq!(summary.generation_request_count, 2);
+    assert_eq!(summary.generation_output_tokens, 264);
+    assert_eq!(summary.generation_duration_ms, 10_500);
+    assert_eq!(summary.estimated_timed_request_count, 1);
+    assert_eq!(summary.estimated_generation_request_count, 1);
+    let filtered = UsageService::logs(
+        &state,
+        LogFilters {
+            app_type: Some("codex".into()),
+            model: Some("gpt-5".into()),
+            status_code: Some(500),
+            start_date: Some(1_700_000_004),
+            end_date: Some(1_700_000_004),
+            ..LogFilters::default()
+        },
+        0,
+        20,
+    )
+    .expect("按状态和时间过滤");
+    assert_eq!(filtered.total, 1);
+    assert_eq!(filtered.speed_summary.output_tokens, 10);
+    assert_eq!(filtered.speed_summary.total_duration_ms, 1_000);
+    assert_eq!(filtered.speed_summary.generation_request_count, 0);
+    let empty = UsageService::logs(
+        &state,
+        LogFilters {
+            app_type: Some("gemini".into()),
+            ..LogFilters::default()
+        },
+        0,
+        20,
+    )
+    .expect("空筛选");
+    assert_eq!(empty.speed_summary, Default::default());
+}
+
 /// 新阅读页只数客户端会话日志；同会话 ID 的代理请求不能再次计入会话汇总。
 #[test]
 fn session_summary_excludes_proxy_rows_and_first_date_includes_rollups() {

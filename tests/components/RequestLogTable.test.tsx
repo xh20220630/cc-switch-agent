@@ -15,8 +15,14 @@ vi.mock("react-i18next", () => ({
       key: string,
       options?: {
         defaultValue?: string;
+        generation?: number;
+        timed?: number;
+        total?: number;
       },
-    ) => options?.defaultValue ?? key,
+    ) =>
+      key === "usage.requestSpeedCoverage"
+        ? `${options?.generation} generation; ${options?.timed}/${options?.total} timed`
+        : (options?.defaultValue ?? key),
     i18n: {
       resolvedLanguage: "en",
       language: "en",
@@ -162,7 +168,7 @@ describe("RequestLogTable", () => {
             latencyMs: 12_900,
             firstTokenMs: 1_800,
           },
-          // 输出不到 100：不算
+          // 短回复也应显示速度：64 / 0.5 s = 128 tok/s。
           {
             ...base,
             requestId: "short",
@@ -186,7 +192,7 @@ describe("RequestLogTable", () => {
             latencyMs: 10_000,
             dataSource: "codex_session",
           },
-          // 会话日志推出了首字：首字带 ≈，速度仍按整段耗时估
+          // 会话日志推出了首字：分别按生成窗口、整段耗时估，均保留 ≈。
           {
             ...base,
             requestId: "session-first-token",
@@ -214,32 +220,41 @@ describe("RequestLogTable", () => {
 
     const rows = screen.getAllByRole("row").slice(1);
     expect(rows).toHaveLength(5);
-    // 最后两列：速度、首字
+    // 最后两列：首字/总耗时、固定在右侧的生成/全程速度。
     const speedCell = (row: HTMLElement) =>
+      row.children[row.children.length - 1];
+    const firstTokenCell = (row: HTMLElement) =>
       row.children[row.children.length - 2];
-    const firstTokenCell = (row: HTMLElement) => row.lastElementChild;
-    expect(speedCell(rows[0])).toHaveTextContent("99tok/s");
-    expect(speedCell(rows[0])).toHaveAttribute("title", "usage.timingTip");
+    expect(speedCell(rows[0])).toHaveTextContent("99 tok/s");
+    expect(speedCell(rows[0])).toHaveTextContent("85 tok/s");
+    expect(speedCell(rows[0])).toHaveAttribute(
+      "title",
+      "usage.requestSpeedHelp",
+    );
+    expect(speedCell(rows[0])).toHaveClass("sticky", "end-0");
     expect(firstTokenCell(rows[0])).toHaveTextContent("1.8s");
-    expect(speedCell(rows[1])).toHaveTextContent("—");
-    // 输出太少不算速度，但首字照样显示
+    expect(firstTokenCell(rows[0])).toHaveClass("sticky", "end-[136px]");
+    expect(firstTokenCell(rows[0])).toHaveTextContent("12.9s");
+    expect(speedCell(rows[1])).toHaveTextContent("128 tok/s");
+    expect(speedCell(rows[1])).toHaveTextContent("27 tok/s");
     expect(firstTokenCell(rows[1])).toHaveTextContent("1.9s");
     expect(speedCell(rows[2])).toHaveTextContent("—");
     expect(firstTokenCell(rows[2])).toHaveTextContent("—");
-    expect(speedCell(rows[3])).toHaveTextContent("≈90tok/s");
+    expect(speedCell(rows[3])).toHaveTextContent("≈90 tok/s");
     expect(speedCell(rows[3])).toHaveAttribute(
       "title",
-      "usage.estimatedTimingTip",
+      "usage.requestSpeedHelp",
     );
     expect(firstTokenCell(rows[3])).toHaveTextContent("—");
-    expect(speedCell(rows[4])).toHaveTextContent("≈90tok/s");
+    expect(speedCell(rows[4])).toHaveTextContent("≈134 tok/s");
+    expect(speedCell(rows[4])).toHaveTextContent("≈90 tok/s");
     expect(firstTokenCell(rows[4])).toHaveTextContent("≈3.3s");
     expect(firstTokenCell(rows[4])).toHaveAttribute(
       "title",
-      "usage.estimatedTimingTipWithFirstToken",
+      "usage.requestTimingTip",
     );
     expect(
-      screen.getByRole("columnheader", { name: /usage.firstToken/ }),
+      screen.getByRole("columnheader", { name: /usage.requestTiming/ }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("columnheader", { name: /usage.speed/ }),
@@ -247,6 +262,57 @@ describe("RequestLogTable", () => {
 
     fireEvent.click(rows[1]);
     expect(onOpenDetail).toHaveBeenCalledWith("short");
+  });
+
+  it("shows the filtered all-page TPK summary instead of averaging current-page speeds", () => {
+    // 当前页无计时，但全筛选范围有统计；不能从本页推出「没有速度」或伪造全量平均值。
+    useRequestLogsMock.mockReturnValue({
+      data: {
+        data: [],
+        total: 25,
+        page: 0,
+        pageSize: 20,
+        speedSummary: {
+          timedRequestCount: 20,
+          outputTokens: 3_000,
+          totalDurationMs: 60_000,
+          generationRequestCount: 16,
+          generationOutputTokens: 2_400,
+          generationDurationMs: 30_000,
+          estimatedTimedRequestCount: 0,
+          estimatedGenerationRequestCount: 0,
+        },
+      },
+      isLoading: false,
+    });
+    render(
+      <RequestLogTable
+        range={{ preset: "7d" }}
+        statusCode={200}
+        refreshIntervalMs={0}
+      />,
+    );
+    const footer = screen.getByRole("region", {
+      name: "usage.requestSpeedSummary",
+    });
+    expect(footer).toHaveTextContent("80 tok/s");
+    expect(footer).toHaveTextContent("50 tok/s");
+    expect(footer).toHaveTextContent("16 generation; 20/25 timed");
+    expect(footer).toHaveTextContent("usage.requestSpeedSummary");
+    expect(useRequestLogsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filters: expect.objectContaining({ statusCode: 200 }),
+      }),
+    );
+  });
+
+  it("labels old-Agent pagination summaries as page-only", () => {
+    render(
+      <RequestLogTable range={{ preset: "today" }} refreshIntervalMs={0} />,
+    );
+    expect(
+      screen.getByRole("region", { name: "usage.requestSpeedPageSummary" }),
+    ).toHaveTextContent("usage.requestSpeedPageSummary");
   });
 
   it("shows full provider names on hover and short app names in the app column", () => {

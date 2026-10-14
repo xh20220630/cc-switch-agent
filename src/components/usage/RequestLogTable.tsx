@@ -16,13 +16,14 @@ import { cn } from "@/lib/utils";
 import {
   fmtInt,
   fmtUsd,
-  formatEstimatedTokensPerSecond,
   formatFirstTokenSeconds,
-  formatOutputTokensPerSecond,
   formatTokensCompact,
+  formatTokensPerSecond,
+  getAggregateTokensPerSecond,
   getLocaleFromLanguage,
-  isSessionLogRequest,
+  getRequestTimingMetrics,
   parseFiniteNumber,
+  summarizeRequestLogSpeeds,
 } from "./format";
 import { usageTable } from "./usageTable";
 import { getUsageProviderLabel, usageProviderTitle } from "./providerLabel";
@@ -138,6 +139,21 @@ export function RequestLogTable({
   const logs = result?.data ?? [];
   const total = result?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  // 新后端返回全筛选范围的汇总；旧 Agent 只展示本页，明确标明范围，避免翻页误报总速度。
+  const speedSummary = result?.speedSummary ?? summarizeRequestLogSpeeds(logs);
+  const isFullSummary = result?.speedSummary != null || total === logs.length;
+  const generationSpeed = formatTokensPerSecond(
+    getAggregateTokensPerSecond(
+      speedSummary.generationOutputTokens,
+      speedSummary.generationDurationMs,
+    ),
+  );
+  const totalSpeed = formatTokensPerSecond(
+    getAggregateTokensPerSecond(
+      speedSummary.outputTokens,
+      speedSummary.totalDurationMs,
+    ),
+  );
 
   useEffect(() => {
     setPage(0);
@@ -168,35 +184,17 @@ export function RequestLogTable({
     const fullTime = formatLogFullTime(log.createdAt);
     const providerLabel = getUsageProviderLabel(log.providerName, t);
     const provider = providerLabel.shortLabel;
-    const exactTps = formatOutputTokensPerSecond(log);
-    // 会话日志导入的请求没有首字计时，速度是按日志时间戳估的，前面带 ≈
-    const estimatedTps =
-      exactTps == null ? formatEstimatedTokensPerSecond(log) : null;
-    const tps = exactTps ?? estimatedTps;
-    const latency = parseFiniteNumber(log.latencyMs);
-    const firstToken = parseFiniteNumber(log.firstTokenMs);
-    const firstTokenText = formatFirstTokenSeconds(firstToken);
-    // 会话日志的耗时和首字都是按时间戳估的，带 ≈
-    const isSession = isSessionLogRequest(log);
-    const timing =
-      latency != null && latency > 0
-        ? {
-            duration: (latency / 1000).toFixed(1),
-            ttft: firstToken != null ? (firstToken / 1000).toFixed(1) : null,
-          }
-        : null;
-    const timingTip =
-      timing == null
-        ? undefined
-        : !isSession
-          ? timing.ttft != null
-            ? t("usage.timingTip", timing)
-            : undefined
-          : timing.ttft != null
-            ? t("usage.estimatedTimingTipWithFirstToken", timing)
-            : estimatedTps != null
-              ? t("usage.estimatedTimingTip", timing)
-              : undefined;
+    const timing = getRequestTimingMetrics(log);
+    const firstTokenText = formatFirstTokenSeconds(timing.firstTokenMs);
+    const durationText = formatFirstTokenSeconds(timing.totalMs);
+    const generationTps = formatTokensPerSecond(timing.generationTps);
+    const totalTps = formatTokensPerSecond(timing.totalTps);
+    // 明细区直接展示两种口径；估算来源始终保留 ≈，没有首字时只展示全程速度。
+    const approximate = timing.isEstimated ? "≈" : "";
+    const timingTip = t("usage.requestTimingTip", {
+      first: firstTokenText ?? t("usage.timingNotRecorded"),
+      duration: durationText ?? t("usage.timingNotRecorded"),
+    });
     const multiplier = parseFiniteNumber(log.costMultiplier);
     const modelTitle =
       log.requestModel && log.requestModel !== log.model
@@ -207,7 +205,10 @@ export function RequestLogTable({
     return (
       <tr
         key={log.requestId}
-        className={onOpenDetail ? usageTable.rowInteractive : usageTable.row}
+        className={cn(
+          onOpenDetail ? usageTable.rowInteractive : usageTable.row,
+          "group",
+        )}
         onClick={() => onOpenDetail?.(log.requestId)}
       >
         {/* 时间、应用两列收紧到内容宽度（w-px），多出来的宽度留给后面的数值列 */}
@@ -306,31 +307,51 @@ export function RequestLogTable({
         >
           {unpriced ? t("usage.unpriced") : fmtUsd(log.totalCostUsd, 4)}
         </td>
-        <td
-          className={cn(usageTable.td, tps == null && usageTable.muted)}
-          title={timingTip}
-        >
-          {tps == null ? (
-            "—"
-          ) : (
-            <>
-              {estimatedTps != null && "≈"}
-              {tps}
-              <span className="ms-0.5 text-badge font-normal text-fg-3">
-                tok/s
-              </span>
-            </>
-          )}
-        </td>
+        {/* 两个计时列一起固定；末列内宽 122px 加两侧 padding 为 136px，须与此偏移同步维护。 */}
         <td
           className={cn(
             usageTable.td,
-            firstTokenText == null && usageTable.muted,
+            "sticky end-[136px] z-10 bg-surface group-hover:bg-subtle",
           )}
           title={timingTip}
         >
-          {isSession && firstTokenText != null && "≈"}
-          {firstTokenText ?? "—"}
+          <div className="w-[100px] py-1 text-caption leading-5">
+            <div>
+              <span className="me-1 text-fg-3">{t("usage.firstToken")}</span>
+              {firstTokenText == null ? "—" : `${approximate}${firstTokenText}`}
+            </div>
+            <div>
+              <span className="me-1 text-fg-3">{t("usage.totalDuration")}</span>
+              {durationText == null ? "—" : `${approximate}${durationText}`}
+            </div>
+          </div>
+        </td>
+        {/* 速度列固定在右侧，窄窗口横向滚动时仍能看到当前请求的两种速率。 */}
+        <td
+          className={cn(
+            usageTable.td,
+            "sticky end-0 z-10 bg-surface group-hover:bg-subtle",
+          )}
+          title={
+            timing.totalMs == null
+              ? t("usage.requestTimingMissing")
+              : t("usage.requestSpeedHelp")
+          }
+        >
+          <div className="w-[122px] whitespace-normal py-1 text-caption leading-5">
+            <div className={cn(generationTps == null && usageTable.muted)}>
+              <span className="me-1 text-fg-3">
+                {t("usage.afterFirstToken")}
+              </span>
+              {generationTps == null
+                ? "—"
+                : `${approximate}${generationTps} tok/s`}
+            </div>
+            <div className={cn(totalTps == null && usageTable.muted)}>
+              <span className="me-1 text-fg-3">{t("usage.endToEnd")}</span>
+              {totalTps == null ? "—" : `${approximate}${totalTps} tok/s`}
+            </div>
+          </div>
         </td>
       </tr>
     );
@@ -339,7 +360,7 @@ export function RequestLogTable({
   return (
     <div className="flex flex-col">
       <div className={usageTable.scroller}>
-        {/* 最小窗口（900）展开侧栏时表格区只有 644px：最小宽度超过它，最右的速度列就被挤到横向滚动里看不见 */}
+        {/* 耗时与速度各用两行，保持列数；速度固定在右侧，不会随供应商长名称被挤出视野。 */}
         <table
           className={cn(usageTable.table, "min-w-[620px]")}
           aria-label={t("usage.requestLogs")}
@@ -354,19 +375,29 @@ export function RequestLogTable({
               <th className={usageTable.th}>{t("usage.outputTokens")}</th>
               <th className={usageTable.th}>{t("usage.cacheReadTokens")}</th>
               <th className={usageTable.th}>{t("usage.cost")}</th>
-              <th className={usageTable.th}>
+              <th
+                className={cn(
+                  usageTable.th,
+                  "sticky end-[136px] z-20 w-[112px] bg-surface",
+                )}
+              >
                 <span className="inline-flex items-center gap-0.5">
-                  {t("usage.speed")}
-                  <HelpTip title={t("usage.speedHelpTitle")} align="end">
-                    {t("usage.speedHelp")}
+                  {t("usage.requestTiming")}
+                  <HelpTip title={t("usage.firstTokenHelpTitle")} align="end">
+                    {t("usage.firstTokenHelp")}
                   </HelpTip>
                 </span>
               </th>
-              <th className={usageTable.th}>
+              <th
+                className={cn(
+                  usageTable.th,
+                  "sticky end-0 z-20 w-[136px] bg-surface",
+                )}
+              >
                 <span className="inline-flex items-center gap-0.5">
-                  {t("usage.firstToken")}
-                  <HelpTip title={t("usage.firstTokenHelpTitle")} align="end">
-                    {t("usage.firstTokenHelp")}
+                  {t("usage.speed")}
+                  <HelpTip title={t("usage.speedHelpTitle")} align="end">
+                    {t("usage.requestSpeedHelp")}
                   </HelpTip>
                 </span>
               </th>
@@ -385,6 +416,49 @@ export function RequestLogTable({
           </tbody>
         </table>
       </div>
+
+      <section
+        aria-label={t(
+          isFullSummary
+            ? "usage.requestSpeedSummary"
+            : "usage.requestSpeedPageSummary",
+        )}
+        className="flex flex-wrap items-center gap-x-5 gap-y-1.5 border-b border-border bg-subtle px-2 py-2 text-caption tabular-nums"
+      >
+        <span className="inline-flex items-center gap-0.5 font-medium">
+          {t(
+            isFullSummary
+              ? "usage.requestSpeedSummary"
+              : "usage.requestSpeedPageSummary",
+          )}
+          <HelpTip title={t("usage.speedHelpTitle")}>
+            {t("usage.requestSpeedSummaryHelp")}
+          </HelpTip>
+        </span>
+        <span>
+          {t("usage.afterFirstToken")}:
+          <strong className="ms-1 font-medium">
+            {generationSpeed == null
+              ? "—"
+              : `${speedSummary.estimatedGenerationRequestCount > 0 ? "≈" : ""}${generationSpeed} tok/s`}
+          </strong>
+        </span>
+        <span>
+          {t("usage.endToEnd")}:
+          <strong className="ms-1 font-medium">
+            {totalSpeed == null
+              ? "—"
+              : `${speedSummary.estimatedTimedRequestCount > 0 ? "≈" : ""}${totalSpeed} tok/s`}
+          </strong>
+        </span>
+        <span className="text-fg-3">
+          {t("usage.requestSpeedCoverage", {
+            generation: speedSummary.generationRequestCount,
+            timed: speedSummary.timedRequestCount,
+            total: isFullSummary ? total : logs.length,
+          })}
+        </span>
+      </section>
 
       <TablePagination
         page={page}

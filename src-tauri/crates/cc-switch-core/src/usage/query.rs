@@ -390,6 +390,52 @@ pub(crate) fn model_stats(
     })
 }
 
+/// 仅接受日志查询内部生成的 WHERE 和绑定参数，调用方必须沿用 l / p 别名。
+/// 在 SQLite 内对全部匹配明细聚合，不能把 LIMIT / OFFSET 带入或平均逐条速率。
+/// 与前端明细一致：总耗时优先 latency_ms，旧记录回退 duration_ms；无计时不参与。
+pub fn request_log_speed_summary(
+    connection: &Connection,
+    where_clause: &str,
+    params: &[&dyn rusqlite::ToSql],
+) -> rusqlite::Result<RequestLogSpeedSummary> {
+    let sql = format!(
+        "WITH timed AS (
+            SELECT l.output_tokens,
+                   CASE WHEN l.latency_ms > 0 THEN l.latency_ms
+                        WHEN l.duration_ms > 0 THEN l.duration_ms END AS total_ms,
+                   l.first_token_ms,
+                   CASE WHEN COALESCE(l.data_source, 'proxy') IN ('', 'proxy')
+                        THEN 0 ELSE 1 END AS estimated
+            FROM proxy_request_logs l
+            LEFT JOIN providers p ON l.provider_id = p.id AND l.app_type = p.app_type
+            {where_clause}
+        ), eligible AS (
+            SELECT *, CASE WHEN first_token_ms >= 0 AND first_token_ms < total_ms
+                           THEN 1 ELSE 0 END AS has_generation
+            FROM timed WHERE output_tokens > 0 AND total_ms > 0
+        )
+        SELECT COUNT(*), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(total_ms), 0),
+               COALESCE(SUM(has_generation), 0),
+               COALESCE(SUM(CASE WHEN has_generation = 1 THEN output_tokens ELSE 0 END), 0),
+               COALESCE(SUM(CASE WHEN has_generation = 1 THEN total_ms - first_token_ms ELSE 0 END), 0),
+               COALESCE(SUM(estimated), 0),
+               COALESCE(SUM(CASE WHEN has_generation = 1 THEN estimated ELSE 0 END), 0)
+        FROM eligible"
+    );
+    connection.query_row(&sql, params, |row| {
+        Ok(RequestLogSpeedSummary {
+            timed_request_count: row.get::<_, i64>(0)?.max(0) as u64,
+            output_tokens: row.get::<_, i64>(1)?.max(0) as u64,
+            total_duration_ms: row.get::<_, i64>(2)?.max(0) as u64,
+            generation_request_count: row.get::<_, i64>(3)?.max(0) as u64,
+            generation_output_tokens: row.get::<_, i64>(4)?.max(0) as u64,
+            generation_duration_ms: row.get::<_, i64>(5)?.max(0) as u64,
+            estimated_timed_request_count: row.get::<_, i64>(6)?.max(0) as u64,
+            estimated_generation_request_count: row.get::<_, i64>(7)?.max(0) as u64,
+        })
+    })
+}
+
 pub(crate) fn logs(
     source: &impl UsageQueryConnection,
     filters: &LogFilters,
@@ -407,6 +453,13 @@ pub(crate) fn logs(
             connection.query_row(&count_sql, params_from_iter(filter.params.iter()), |row| {
                 row.get::<_, i64>(0)
             })? as u32;
+        let summary_params: Vec<&dyn rusqlite::ToSql> = filter
+            .params
+            .iter()
+            .map(|value| value as &dyn rusqlite::ToSql)
+            .collect();
+        let speed_summary =
+            request_log_speed_summary(connection, &filter.where_clause(), &summary_params)?;
         let provider_name = provider_name_sql("l", "p");
         let sql = format!(
             "{} {join} {} ORDER BY l.created_at DESC LIMIT ? OFFSET ?",
@@ -424,6 +477,7 @@ pub(crate) fn logs(
             total,
             page,
             page_size,
+            speed_summary,
         };
         let actual = serde_json::to_vec(&result)?.len();
         if actual > MAX_FRAME_BYTES {

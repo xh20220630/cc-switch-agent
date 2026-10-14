@@ -57,6 +57,20 @@ export interface PaginatedLogs {
   total: number;
   page: number;
   pageSize: number;
+  /** 当前筛选范围的全部明细计时汇总；旧 Agent 缺少此字段时只能显示本页统计。 */
+  speedSummary?: RequestLogSpeedSummary;
+}
+
+/** 分子、分母按同一批有有效计时的请求累计，分页和刷新不能改变统计口径。 */
+export interface RequestLogSpeedSummary {
+  timedRequestCount: number;
+  outputTokens: number;
+  totalDurationMs: number;
+  generationRequestCount: number;
+  generationOutputTokens: number;
+  generationDurationMs: number;
+  estimatedTimedRequestCount: number;
+  estimatedGenerationRequestCount: number;
 }
 
 export interface ModelPricing {

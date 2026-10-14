@@ -5,6 +5,7 @@ mod query;
 mod script;
 mod session;
 mod sql;
+mod timing;
 
 use rusqlite::Connection;
 use serde::Deserialize;
@@ -14,6 +15,8 @@ use crate::dispatch::CommandError;
 use crate::{CoreError, HeadlessState};
 
 pub use model::*;
+// 桌面与 Agent 的日志查询共用同一计时 SQL，避免同一请求在两个目标上显示不同速度。
+pub use query::request_log_speed_summary;
 pub use sql::{
     fresh_input_sql, is_cache_inclusive_app, CACHE_INCLUSIVE_APP_TYPES,
     INPUT_TOKEN_SEMANTICS_FRESH, INPUT_TOKEN_SEMANTICS_LEGACY, INPUT_TOKEN_SEMANTICS_TOTAL,

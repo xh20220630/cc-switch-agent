@@ -15,6 +15,9 @@ use super::model::{OperationCancellation, PricingUpdate, ProviderLimitStatus, Se
 use super::sql::{
     is_cache_inclusive_app, INPUT_TOKEN_SEMANTICS_FRESH, INPUT_TOKEN_SEMANTICS_TOTAL,
 };
+use super::timing::{
+    mark_revision_current, revision_requires_replay, CodexRequestTimer, EstimatedTiming,
+};
 
 #[derive(Clone)]
 struct PricingInfo {
@@ -268,6 +271,11 @@ fn sync_codex_sessions(
         }
     }
     files.sort();
+    // 旧 Agent 把计时固定写成 0。版本升级只重放导入并回填计时，不删除记录或重算 token。
+    const TIMING_REVISION_KEY: &str = "agent_codex_usage_timing_revision";
+    let backfill_timing = state.with_connection(|connection| {
+        Ok(revision_requires_replay(connection, TIMING_REVISION_KEY)?)
+    })?;
     let parsed = files
         .iter()
         .map(|file| parse_codex_file(file, cancellation))
@@ -283,7 +291,9 @@ fn sync_codex_sessions(
     };
     for file in &parsed {
         cancellation.check()?;
-        if !super::session::watermark_requires_scan(state, &file.path, file.modified)? {
+        if !backfill_timing
+            && !super::session::watermark_requires_scan(state, &file.path, file.modified)?
+        {
             continue;
         }
         let Some(replay_count) = codex_replay_count(file, &parsed, &rollout_index) else {
@@ -318,11 +328,11 @@ fn sync_codex_sessions(
                         input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
                         input_token_semantics, input_cost_usd, output_cost_usd,
                         cache_read_cost_usd, cache_creation_cost_usd, total_cost_usd,
-                        latency_ms, status_code, created_at, data_source, cost_multiplier
+                        latency_ms, first_token_ms, status_code, created_at, data_source, cost_multiplier
                      ) VALUES (
                         ?1, '_codex_session', 'codex', ?2, ?2, ?2,
                         ?3, ?4, ?5, 0, 1, '0', '0', '0', '0', '0',
-                        0, 200, ?6, 'codex_session', '1'
+                        ?7, ?8, 200, ?6, 'codex_session', '1'
                      )",
                     params![
                         row.request_id,
@@ -331,11 +341,24 @@ fn sync_codex_sessions(
                         row.output_tokens as i64,
                         row.cache_read_tokens as i64,
                         row.created_at,
+                        row.timing.map_or(0, |timing| timing.latency_ms) as i64,
+                        row.timing.and_then(|timing| timing.first_token_ms).map(|first| first as i64),
                     ],
                 )?;
                 if changed == 1 {
                     result.imported = result.imported.saturating_add(1);
                 } else {
+                    // 同一请求的历史计费数据保持原样，只补齐缺失的耗时与首字字段。
+                    if let Some(timing) = row.timing {
+                        transaction.execute(
+                            "UPDATE proxy_request_logs SET
+                                latency_ms = CASE WHEN latency_ms <= 0 THEN ?2 ELSE latency_ms END,
+                                first_token_ms = COALESCE(first_token_ms, ?3)
+                             WHERE request_id = ?1 AND data_source = 'codex_session'",
+                            params![row.request_id, timing.latency_ms as i64,
+                                timing.first_token_ms.map(|first| first as i64)],
+                        )?;
+                    }
                     result.skipped = result.skipped.saturating_add(1);
                 }
             }
@@ -348,6 +371,12 @@ fn sync_codex_sessions(
             file.modified,
             file.events.len() as i64,
         )?;
+    }
+    if result.deferred_files == 0 {
+        state.with_connection(|connection| {
+            mark_revision_current(connection, TIMING_REVISION_KEY)?;
+            Ok(())
+        })?;
     }
     Ok(result)
 }
@@ -392,6 +421,7 @@ struct CodexUsageRow {
     output_tokens: u64,
     cache_read_tokens: u64,
     created_at: i64,
+    timing: Option<EstimatedTiming>,
 }
 
 struct CodexTokenEvent {
@@ -400,6 +430,7 @@ struct CodexTokenEvent {
     model: String,
     created_at: i64,
     event_index: u64,
+    timing: Option<EstimatedTiming>,
 }
 
 struct ParsedCodexFile {
@@ -437,6 +468,8 @@ fn parse_codex_file(
     let mut spawned_from = None;
     let mut event_index = 0u64;
     let mut events = Vec::new();
+    let mut timer = CodexRequestTimer::default();
+    let mut timing_counters = CodexCumulative::default();
     for line in BufReader::new(file).lines() {
         cancellation.check()?;
         let line = line.map_err(|source| CoreError::Io {
@@ -446,6 +479,7 @@ fn parse_codex_file(
         let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
             continue;
         };
+        timer.observe(&value);
         match value.get("type").and_then(serde_json::Value::as_str) {
             Some("session_meta") => {
                 let payload = value.get("payload");
@@ -499,12 +533,24 @@ fn parse_codex_file(
                     continue;
                 };
                 event_index = event_index.saturating_add(1);
+                // 空计数或重复累计值是心跳，不结束当前请求；与桌面 nonzero_index 计时口径一致。
+                let has_new_usage = if cumulative {
+                    current.input > timing_counters.input || current.output > timing_counters.output
+                } else {
+                    current.input > 0 || current.output > 0
+                };
+                if cumulative {
+                    timing_counters = current;
+                }
                 events.push(CodexTokenEvent {
                     counters: current,
                     cumulative,
                     model: model.clone(),
                     created_at,
                     event_index,
+                    timing: has_new_usage
+                        .then(|| timer.finish(&value, info.get("last_token_usage")))
+                        .flatten(),
                 });
             }
             _ => {}
@@ -624,6 +670,7 @@ fn codex_usage_rows(file: &ParsedCodexFile, replay_count: usize) -> Vec<CodexUsa
             output_tokens: output,
             cache_read_tokens: cached,
             created_at: event.created_at,
+            timing: event.timing,
         });
     }
     rows

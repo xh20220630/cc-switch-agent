@@ -2501,7 +2501,19 @@
       "cacheWrite": "Cache write"
     },
     "prevMonth": "Previous month",
-    "nextMonth": "Next month"
+    "nextMonth": "Next month",
+    "totalDuration": "Total",
+    "afterFirstToken": "Generation",
+    "endToEnd": "Full",
+    "requestTiming": "TTFT / Total",
+    "requestTimingTip": "First token: {{first}}; total duration: {{duration}}",
+    "timingNotRecorded": "Not recorded",
+    "requestTimingMissing": "This request has no valid duration, so its speed cannot be calculated.",
+    "requestSpeedHelp": "Generation speed = output tokens / (total duration − first-token wait). Full speed = output tokens / total duration. All timed replies are shown; ≈ indicates an estimate from session-log timestamps.",
+    "requestSpeedSummary": "Total TPK",
+    "requestSpeedPageSummary": "Page TPK",
+    "requestSpeedSummaryHelp": "All requests matching the current filters are summarized as total output tokens / corresponding total time, in tok/s, rather than averaging individual rates. Untimed records are excluded. Older Agents without a full summary show this page only.",
+    "requestSpeedCoverage": "Timing coverage: generation {{generation}}; full {{timed}} / {{total}} requests"
   },
   "usageScript": {
     "title": "Configure Usage Query",

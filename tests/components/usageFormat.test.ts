@@ -12,10 +12,94 @@ import {
   getEstimatedTokensPerSecond,
   getOutputTokensPerSecond,
   getLocaleFromLanguage,
+  getRequestTimingMetrics,
   sumSpeedTotals,
+  summarizeRequestLogSpeeds,
 } from "@/components/usage/format";
 
 describe("usage format helpers", () => {
+  it("shows short request rates separately from the sampled provider-statistics rates", () => {
+    const log = { outputTokens: 64, latencyMs: 2_400, firstTokenMs: 1_900 };
+    expect(getRequestTimingMetrics(log)).toMatchObject({
+      totalMs: 2_400,
+      firstTokenMs: 1_900,
+      generationMs: 500,
+      generationTps: 128,
+      totalTps: 64 / 2.4,
+      isEstimated: false,
+    });
+    // 榜单继续保持原有采样规则，明细展示不能改变榜单历史口径。
+    expect(getOutputTokensPerSecond(log)).toBeNull();
+  });
+
+  it("uses full duration without a first token and supports old duration-only records", () => {
+    expect(
+      getRequestTimingMetrics({
+        outputTokens: 20,
+        latencyMs: 0,
+        durationMs: 2_000,
+      }),
+    ).toMatchObject({
+      totalMs: 2_000,
+      firstTokenMs: null,
+      generationTps: null,
+      totalTps: 10,
+    });
+    expect(
+      getRequestTimingMetrics({
+        outputTokens: 20,
+        latencyMs: 1_000,
+        durationMs: 3_000,
+      }),
+    ).toMatchObject({ totalMs: 1_000, totalTps: 20 });
+    for (const firstTokenMs of [-1, 3_000, Number.NaN]) {
+      expect(
+        getRequestTimingMetrics({
+          outputTokens: 20,
+          latencyMs: 2_000,
+          firstTokenMs,
+        }),
+      ).toMatchObject({
+        firstTokenMs: null,
+        generationTps: null,
+        totalTps: 10,
+      });
+    }
+    expect(
+      getRequestTimingMetrics({ outputTokens: 20, latencyMs: 0 }),
+    ).toMatchObject({ generationTps: null, totalTps: null });
+  });
+
+  it("aggregates request timing with token/time weighting and keeps estimate coverage", () => {
+    const summary = summarizeRequestLogSpeeds([
+      { outputTokens: 100, latencyMs: 11_000, firstTokenMs: 1_000 },
+      {
+        outputTokens: 50,
+        latencyMs: 2_000,
+        firstTokenMs: 1_000,
+        dataSource: "codex_session",
+      },
+      { outputTokens: 20, latencyMs: 2_000 },
+      { outputTokens: 900, latencyMs: 0 },
+      { outputTokens: 0, latencyMs: 2_000 },
+    ]);
+    expect(summary).toEqual({
+      timedRequestCount: 3,
+      outputTokens: 170,
+      totalDurationMs: 15_000,
+      generationRequestCount: 2,
+      generationOutputTokens: 150,
+      generationDurationMs: 11_000,
+      estimatedTimedRequestCount: 1,
+      estimatedGenerationRequestCount: 1,
+    });
+    expect(
+      getAggregateTokensPerSecond(
+        summary.generationOutputTokens,
+        summary.generationDurationMs,
+      ),
+    ).toBeCloseTo(13.636);
+  });
   it("formats Traditional Chinese token units with Traditional characters", () => {
     expect(formatTokensShort(12_345, "zh-TW")).toBe("1.2 萬");
     expect(formatTokensShort(123_456_789, "zh-Hant", 2)).toBe("1.23 億");

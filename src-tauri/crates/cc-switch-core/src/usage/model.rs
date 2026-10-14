@@ -95,6 +95,23 @@ pub struct PaginatedLogs {
     pub total: u32,
     pub page: u32,
     pub page_size: u32,
+    /// 分页前、与明细完全相同筛选范围的速度汇总；兼容旧响应的反序列化。
+    #[serde(default)]
+    pub speed_summary: RequestLogSpeedSummary,
+}
+
+/// 生成速度与全程速度分别累计分子分母，缺首字的记录只计入全程统计。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestLogSpeedSummary {
+    pub timed_request_count: u64,
+    pub output_tokens: u64,
+    pub total_duration_ms: u64,
+    pub generation_request_count: u64,
+    pub generation_output_tokens: u64,
+    pub generation_duration_ms: u64,
+    pub estimated_timed_request_count: u64,
+    pub estimated_generation_request_count: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

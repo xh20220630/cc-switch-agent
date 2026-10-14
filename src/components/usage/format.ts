@@ -1,3 +1,5 @@
+import type { RequestLogSpeedSummary } from "@/types/usage";
+
 export function parseFiniteNumber(value: unknown): number | null {
   if (typeof value === "number") {
     return Number.isFinite(value) ? value : null;
@@ -38,7 +40,75 @@ interface OutputTokensPerSecondInput {
   outputTokens: unknown;
   latencyMs: unknown;
   firstTokenMs?: unknown;
+  durationMs?: unknown;
   dataSource?: unknown;
+}
+
+/**
+ * 请求明细展示实测/估算计时，不套用供应商榜单的长回复采样门槛。
+ * latencyMs 是现行总耗时；仅在它缺失时兼容旧记录的 durationMs。
+ * 首字缺失或超过总耗时时不计算生成速度，但有效总耗时仍可计算全程速度。
+ */
+export function getRequestTimingMetrics(log: OutputTokensPerSecondInput) {
+  const latency = parseFiniteNumber(log.latencyMs);
+  const duration = parseFiniteNumber(log.durationMs);
+  const totalMs =
+    latency != null && latency > 0
+      ? latency
+      : duration != null && duration > 0
+        ? duration
+        : null;
+  const first = parseFiniteNumber(log.firstTokenMs);
+  const firstTokenMs =
+    first != null && first >= 0 && (totalMs == null || first <= totalMs)
+      ? first
+      : null;
+  const generationMs =
+    totalMs != null && firstTokenMs != null && totalMs > firstTokenMs
+      ? totalMs - firstTokenMs
+      : null;
+  const output = parseFiniteNumber(log.outputTokens);
+  return {
+    totalMs,
+    firstTokenMs,
+    generationMs,
+    generationTps: getAggregateTokensPerSecond(output, generationMs),
+    totalTps: getAggregateTokensPerSecond(output, totalMs),
+    isEstimated: isSessionLogRequest(log),
+  };
+}
+
+/** 兼容旧 Agent：只汇总已拿到的行，界面必须标明「本页」，不能冒充全量统计。 */
+export function summarizeRequestLogSpeeds(
+  logs: readonly OutputTokensPerSecondInput[],
+): RequestLogSpeedSummary {
+  const summary: RequestLogSpeedSummary = {
+    timedRequestCount: 0,
+    outputTokens: 0,
+    totalDurationMs: 0,
+    generationRequestCount: 0,
+    generationOutputTokens: 0,
+    generationDurationMs: 0,
+    estimatedTimedRequestCount: 0,
+    estimatedGenerationRequestCount: 0,
+  };
+  for (const log of logs) {
+    const timing = getRequestTimingMetrics(log);
+    const output = parseFiniteNumber(log.outputTokens);
+    if (output == null || timing.totalTps == null || timing.totalMs == null)
+      continue;
+    summary.timedRequestCount += 1;
+    summary.outputTokens += output;
+    summary.totalDurationMs += timing.totalMs;
+    if (timing.isEstimated) summary.estimatedTimedRequestCount += 1;
+    if (timing.generationTps != null && timing.generationMs != null) {
+      summary.generationRequestCount += 1;
+      summary.generationOutputTokens += output;
+      summary.generationDurationMs += timing.generationMs;
+      if (timing.isEstimated) summary.estimatedGenerationRequestCount += 1;
+    }
+  }
+  return summary;
 }
 
 /**

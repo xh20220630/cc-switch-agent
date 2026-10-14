@@ -2501,7 +2501,19 @@
       "cacheWrite": "缓存写入"
     },
     "prevMonth": "上个月",
-    "nextMonth": "下个月"
+    "nextMonth": "下个月",
+    "totalDuration": "总耗时",
+    "afterFirstToken": "首字后",
+    "endToEnd": "全程",
+    "requestTiming": "首字 / 总耗时",
+    "requestTimingTip": "首字：{{first}}；总耗时：{{duration}}",
+    "timingNotRecorded": "未记录",
+    "requestTimingMissing": "这条请求未记录有效总耗时，无法计算速度。",
+    "requestSpeedHelp": "首字后速度 = 输出 token ÷（总耗时 − 首字等待）；全程速度 = 输出 token ÷ 总耗时。所有有有效计时的回复都显示，≈ 表示按会话日志时间戳估算。",
+    "requestSpeedSummary": "总 TPK",
+    "requestSpeedPageSummary": "本页 TPK",
+    "requestSpeedSummaryHelp": "统计当前筛选范围的全部请求，使用总输出 token ÷ 对应总用时，单位为 tok/s；不对逐条速度取平均。缺少计时的记录不参与，旧 Agent 没有全量汇总时仅统计本页。",
+    "requestSpeedCoverage": "计时覆盖：首字后 {{generation}} 条，全程 {{timed}} / {{total}} 条"
   },
   "usageScript": {
     "title": "配置用量查询",

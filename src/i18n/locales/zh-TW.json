@@ -2477,7 +2477,19 @@
       "cacheWrite": "快取寫入"
     },
     "prevMonth": "上個月",
-    "nextMonth": "下個月"
+    "nextMonth": "下個月",
+    "totalDuration": "總耗時",
+    "afterFirstToken": "首字後",
+    "endToEnd": "全程",
+    "requestTiming": "首字 / 總耗時",
+    "requestTimingTip": "首字：{{first}}；總耗時：{{duration}}",
+    "timingNotRecorded": "未記錄",
+    "requestTimingMissing": "此請求未記錄有效總耗時，無法計算速度。",
+    "requestSpeedHelp": "首字後速度 = 輸出 token ÷（總耗時 − 首字等待）；全程速度 = 輸出 token ÷ 總耗時。所有有有效計時的回覆都顯示，≈ 表示按工作階段日誌時間戳記估算。",
+    "requestSpeedSummary": "總 TPK",
+    "requestSpeedPageSummary": "本頁 TPK",
+    "requestSpeedSummaryHelp": "統計目前篩選範圍的全部請求，使用總輸出 token ÷ 對應總用時，單位為 tok/s；不平均逐筆速度。缺少計時的記錄不參與，舊 Agent 沒有全量彙總時僅統計本頁。",
+    "requestSpeedCoverage": "計時涵蓋：首字後 {{generation}} 筆，全程 {{timed}} / {{total}} 筆"
   },
   "usageScript": {
     "title": "設定用量查詢",

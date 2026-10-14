@@ -3,6 +3,7 @@
 //! 所有路径都从 `HeadlessState::home()` 派生，确保 Agent 只读取所连接主机的 CLI 数据；
 //! 解析器不依赖 Tauri、全局 HOME 或桌面配置覆盖，适合作为远程临时进程的稳定边界。
 
+use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -15,6 +16,9 @@ use crate::{CoreError, HeadlessState};
 
 use super::model::{OperationCancellation, SessionSyncResult};
 use super::sql::{INPUT_TOKEN_SEMANTICS_FRESH, INPUT_TOKEN_SEMANTICS_TOTAL};
+use super::timing::{estimate, mark_revision_current, revision_requires_replay, timestamp_ms};
+
+const TIMING_REVISION_KEY: &str = "agent_session_usage_timing_revision";
 
 const SESSION_PROXY_DEDUP_WINDOW_SECONDS: i64 = 10 * 60;
 const GROK_SETTLE_WINDOW_SECONDS: i64 = SESSION_PROXY_DEDUP_WINDOW_SECONDS;
@@ -31,6 +35,7 @@ struct SessionRow {
     input_token_semantics: i64,
     total_cost: String,
     latency_ms: u64,
+    first_token_ms: Option<u64>,
     session_id: Option<String>,
     created_at: i64,
     data_source: &'static str,
@@ -78,6 +83,13 @@ pub(super) fn sync_non_codex_sessions(
     cancellation.check()?;
     merge_source(&mut aggregate, "Kimi", sync_kimi(state, cancellation));
     cancellation.check()?;
+    // 计时解析升级成功后恢复文件水位跳过；失败时保留重放机会，历史 token 不重复入账。
+    if aggregate.errors.is_empty() {
+        state.with_connection(|connection| {
+            mark_revision_current(connection, TIMING_REVISION_KEY)?;
+            Ok(())
+        })?;
+    }
     Ok(aggregate)
 }
 
@@ -120,6 +132,9 @@ fn sync_claude(
             }
         };
         let mut current_session = None;
+        let mut boundary = None;
+        // 同一 assistant message 可能分块写多次，起点只在第一次出现时固定。
+        let mut message_starts = HashMap::new();
         let mut line_count = 0_i64;
         for line in BufReader::new(file).lines() {
             cancellation.check()?;
@@ -131,7 +146,11 @@ fn sync_claude(
             if current_session.is_none() {
                 current_session = string_at(&value, &["sessionId"]);
             }
+            let at = value.get("timestamp").and_then(timestamp_ms);
             if string_at(&value, &["type"]).as_deref() != Some("assistant") {
+                if string_at(&value, &["type"]).as_deref() == Some("user") {
+                    boundary = boundary.max(at);
+                }
                 continue;
             }
             let Some(message) = value.get("message") else {
@@ -153,6 +172,19 @@ fn sync_claude(
             let session_id = current_session
                 .clone()
                 .or_else(|| string_at(&value, &["sessionId"]));
+            let start = *message_starts.entry(message_id.clone()).or_insert(boundary);
+            // Claude 只有首个 thinking 块携带生成时长时才可反推首字，其余保持未知。
+            let first = value
+                .get("thinkingDurationMs")
+                .and_then(serde_json::Value::as_i64)
+                .filter(|duration| *duration > 0)
+                .filter(|_| {
+                    message["content"][0]["type"] == "thinking"
+                        && value["apiBlockIndex"].as_i64() == Some(0)
+                })
+                .and_then(|duration| at?.checked_sub(duration));
+            let timing = estimate(start, at, first);
+            boundary = boundary.max(at);
             let row = SessionRow {
                 request_id: format!(
                     "claude_session:{}:{message_id}",
@@ -167,7 +199,8 @@ fn sync_claude(
                 cache_creation_tokens: cache_creation,
                 input_token_semantics: INPUT_TOKEN_SEMANTICS_FRESH,
                 total_cost: "0".to_string(),
-                latency_ms: 0,
+                latency_ms: timing.map_or(0, |timing| timing.latency_ms),
+                first_token_ms: timing.and_then(|timing| timing.first_token_ms),
                 session_id,
                 created_at: timestamp_at(&value, &["timestamp"]).unwrap_or_else(now_epoch),
                 data_source: "claude_session",
@@ -242,6 +275,7 @@ fn sync_gemini(
                 input_token_semantics: INPUT_TOKEN_SEMANTICS_TOTAL,
                 total_cost: "0".to_string(),
                 latency_ms: 0,
+                first_token_ms: None,
                 session_id: session_id.clone(),
                 created_at: timestamp_at(message, &["timestamp"]).unwrap_or_else(now_epoch),
                 data_source: "gemini_session",
@@ -268,7 +302,7 @@ fn sync_opencode(
     }
     cancellation.check()?;
     let modified = opencode_modified_nanos(&path)?;
-    if !watermark_requires_scan(state, &path, modified)? {
+    if !timing_replay_required(state)? && !watermark_requires_scan(state, &path, modified)? {
         return Ok(SessionSyncResult {
             files_scanned: 1,
             ..SessionSyncResult::default()
@@ -328,7 +362,14 @@ fn sync_opencode(
             cache_creation_tokens: cache_creation,
             input_token_semantics: INPUT_TOKEN_SEMANTICS_FRESH,
             total_cost,
-            latency_ms: 0,
+            // OpenCode 保留请求创建/完成的毫秒时间戳；没有首字事件时只计算全程速率。
+            latency_ms: estimate(
+                i64_at(&value, &["time", "created"]),
+                i64_at(&value, &["time", "completed"]),
+                None,
+            )
+            .map_or(0, |timing| timing.latency_ms),
+            first_token_ms: None,
             session_id: Some(session_id),
             created_at: i64_at(&value, &["time", "created"])
                 .map(|value| value / 1_000)
@@ -511,6 +552,7 @@ fn record_grok_row(
             input_token_semantics: INPUT_TOKEN_SEMANTICS_TOTAL,
             total_cost,
             latency_ms: u64_at(counters, &["apiDurationMs"]),
+            first_token_ms: None,
             session_id: Some(context.session_id.to_string()),
             created_at: context.created_at,
             data_source: "grok_session",
@@ -601,6 +643,7 @@ pub(super) fn sync_kimi(
                 input_token_semantics: INPUT_TOKEN_SEMANTICS_FRESH,
                 total_cost: "0".to_string(),
                 latency_ms: 0,
+                first_token_ms: None,
                 session_id: Some(session_id),
                 created_at: normalize_epoch(time_ms),
                 data_source: "kimi_session",
@@ -637,21 +680,22 @@ fn record_row(
     row: SessionRow,
     result: &mut SessionSyncResult,
 ) -> Result<(), CoreError> {
+    // 会话行的费用 0 也代表尚未定价，不能仅因补计时把历史已计价记录改成免费。
     let changed = state.with_connection(|connection| {
         if has_matching_proxy_row(connection, &row)? {
             return Ok(0);
         }
-        Ok(connection.execute(
+        let changed = connection.execute(
             "INSERT INTO proxy_request_logs (
                 request_id, provider_id, app_type, model, request_model, pricing_model,
                 input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
                 input_token_semantics, input_cost_usd, output_cost_usd,
                 cache_read_cost_usd, cache_creation_cost_usd, total_cost_usd,
                 latency_ms, status_code, session_id, provider_type, is_streaming,
-                cost_multiplier, created_at, data_source
+                cost_multiplier, created_at, data_source, first_token_ms
              ) VALUES (
                 ?1, ?2, ?3, ?4, ?4, ?4, ?5, ?6, ?7, ?8, ?9,
-                '0', '0', '0', '0', ?10, ?11, 200, ?12, ?13, 1, '1', ?14, ?15
+                '0', '0', '0', '0', ?10, ?11, 200, ?12, ?13, 1, '1', ?14, ?15, ?16
              )
              ON CONFLICT(request_id) DO UPDATE SET
                 model = excluded.model,
@@ -678,7 +722,8 @@ fn record_row(
                  OR proxy_request_logs.cache_read_tokens != excluded.cache_read_tokens
                  OR proxy_request_logs.cache_creation_tokens != excluded.cache_creation_tokens
                  OR proxy_request_logs.input_token_semantics != excluded.input_token_semantics
-                 OR proxy_request_logs.total_cost_usd != excluded.total_cost_usd
+                 OR (CAST(excluded.total_cost_usd AS REAL) > 0
+                     AND proxy_request_logs.total_cost_usd != excluded.total_cost_usd)
                  OR proxy_request_logs.created_at != excluded.created_at
                )",
             params![
@@ -697,8 +742,24 @@ fn record_row(
                 row.data_source,
                 row.created_at,
                 row.data_source,
+                row.first_token_ms.map(|first| first as i64),
             ],
-        )?)
+        )?;
+        // 计时回填独立更新，不能因补齐耗时而改写历史 token、成本或覆盖代理直录。
+        let timing_changed = connection.execute(
+            "UPDATE proxy_request_logs SET
+                    latency_ms = CASE WHEN latency_ms <= 0 THEN ?2 ELSE latency_ms END,
+                    first_token_ms = COALESCE(first_token_ms, ?3)
+                 WHERE request_id = ?1 AND data_source = ?4 AND
+                    ((latency_ms <= 0 AND ?2 > 0) OR (first_token_ms IS NULL AND ?3 IS NOT NULL))",
+            params![
+                row.request_id,
+                row.latency_ms as i64,
+                row.first_token_ms.map(|first| first as i64),
+                row.data_source
+            ],
+        )?;
+        Ok(changed.max(timing_changed))
     })?;
     if changed == 1 {
         result.imported = result.imported.saturating_add(1);
@@ -855,7 +916,18 @@ fn file_requires_scan(state: &HeadlessState, path: &Path) -> Result<(bool, i64),
         source,
     })?;
     let modified = metadata_modified_nanos(&metadata);
-    Ok((watermark_requires_scan(state, path, modified)?, modified))
+    let needs_timing =
+        path.starts_with(state.home().join(".claude")) && timing_replay_required(state)?;
+    Ok((
+        needs_timing || watermark_requires_scan(state, path, modified)?,
+        modified,
+    ))
+}
+
+fn timing_replay_required(state: &HeadlessState) -> Result<bool, CoreError> {
+    state.with_connection(|connection| {
+        Ok(revision_requires_replay(connection, TIMING_REVISION_KEY)?)
+    })
 }
 
 fn opencode_modified_nanos(path: &Path) -> Result<i64, CoreError> {

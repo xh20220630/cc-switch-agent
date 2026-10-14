@@ -2476,7 +2476,19 @@
       "cacheWrite": "キャッシュ書き込み"
     },
     "prevMonth": "前月",
-    "nextMonth": "翌月"
+    "nextMonth": "翌月",
+    "totalDuration": "総時間",
+    "afterFirstToken": "首字後",
+    "endToEnd": "全体",
+    "requestTiming": "TTFT / 総時間",
+    "requestTimingTip": "最初のトークン：{{first}}、総時間：{{duration}}",
+    "timingNotRecorded": "未記録",
+    "requestTimingMissing": "有効な総時間が記録されていないため、速度を計算できません。",
+    "requestSpeedHelp": "首字後の速度 = 出力 token ÷（総時間 − 最初のトークンまでの待機）。全体の速度 = 出力 token ÷ 総時間。有効な計時がある返信をすべて表示し、≈ はセッションログの時刻からの推定を表します。",
+    "requestSpeedSummary": "合計 TPK",
+    "requestSpeedPageSummary": "このページの TPK",
+    "requestSpeedSummaryHelp": "現在のフィルターに一致する全リクエストについて、総出力 token ÷ 対応する総時間を tok/s で表示します。個別速度の平均ではありません。計時のない記録は除外し、全件集計に未対応の古い Agent ではこのページのみ集計します。",
+    "requestSpeedCoverage": "計時対象：首字後 {{generation}} 件、全体 {{timed}} / {{total}} 件"
   },
   "usageScript": {
     "title": "利用状況を設定",

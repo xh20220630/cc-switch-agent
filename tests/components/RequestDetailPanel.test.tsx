@@ -60,12 +60,13 @@ describe("RequestDetailPanel", () => {
     expect(screen.getByText("$0.0670")).toBeInTheDocument();
   });
 
-  it("explains why short outputs have no speed", () => {
+  it("shows generation and full-duration speed for short outputs", () => {
     renderWith(
       log({ outputTokens: 64, latencyMs: 2_400, firstTokenMs: 1_900 }),
     );
 
-    expect(screen.getByText("usage.detail.speedTooFew")).toBeInTheDocument();
+    expect(screen.getByText("usage.speedValue:128")).toBeInTheDocument();
+    expect(screen.getByText("usage.speedValue:27")).toBeInTheDocument();
   });
 
   it("shows an estimated speed and duration for session logs", () => {
@@ -103,14 +104,17 @@ describe("RequestDetailPanel", () => {
       screen.getByText("usage.detail.firstTokenEstimated"),
     ).toBeInTheDocument();
     expect(screen.getByText("3.3s")).toBeInTheDocument();
-    // 速度仍按整段耗时估
+    // 首字后与全程分别展示，二者都明确标为估算值。
+    expect(
+      screen.getByText("usage.speedEstimatedValue:108"),
+    ).toBeInTheDocument();
     expect(
       screen.getByText("usage.speedEstimatedValue:90"),
     ).toBeInTheDocument();
     expect(screen.queryByText("usage.detail.firstToken")).toBeNull();
   });
 
-  it("explains why short session-log outputs have no estimate", () => {
+  it("shows the full-duration speed of short session-log outputs", () => {
     renderWith(
       log({
         dataSource: "session_log",
@@ -121,7 +125,7 @@ describe("RequestDetailPanel", () => {
     );
 
     expect(
-      screen.getByText("usage.detail.speedEstimateTooFew"),
+      screen.getByText("usage.speedEstimatedValue:20"),
     ).toBeInTheDocument();
     expect(screen.getByText("6.0s")).toBeInTheDocument();
   });

@@ -289,6 +289,8 @@ pub struct PaginatedLogs {
     pub total: u32,
     pub page: u32,
     pub page_size: u32,
+    /// 全筛选范围的计时汇总；使用无界面核心的 DTO 与 SQL，保持远程/本机一致。
+    pub speed_summary: cc_switch_core::RequestLogSpeedSummary,
 }
 
 /// 请求日志详情
@@ -2179,6 +2181,12 @@ impl Database {
         };
         drop(count_cache);
 
+        // 速度在分页参数加入前聚合，翻页只替换明细，不改变底部的全量 TPK。
+        let summary_params: Vec<&dyn rusqlite::ToSql> =
+            params.iter().map(|value| value.as_ref()).collect();
+        let speed_summary =
+            cc_switch_core::request_log_speed_summary(&conn, &where_clause, &summary_params)?;
+
         // 获取数据
         let offset = page * page_size;
         params.push(Box::new(page_size as i64));
@@ -2218,6 +2226,7 @@ impl Database {
             total,
             page,
             page_size,
+            speed_summary,
         })
     }
 
@@ -2935,6 +2944,74 @@ fn should_try_pricing_prefix_match(model_id: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 桌面分页 DTO 使用同一汇总口径，换页和状态筛选不能偷偷只统计当前页。
+    #[test]
+    fn test_request_log_speed_summary_matches_core_and_stays_full_range() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        {
+            let conn = lock_conn!(db.conn);
+            let cases = [
+                ("speed-short", "claude", "proxy", 64, 2_400, Some(1_900)),
+                (
+                    "speed-session",
+                    "codex",
+                    "codex_session",
+                    200,
+                    11_000,
+                    Some(1_000),
+                ),
+                ("speed-nonstream", "claude", "proxy", 20, 2_000, None),
+                ("speed-untimed", "codex", "codex_session", 900, 0, None),
+            ];
+            for (index, (id, app, source, output, latency, first)) in cases.iter().enumerate() {
+                insert_usage_log(
+                    &conn,
+                    id,
+                    app,
+                    "p-speed",
+                    "test-model",
+                    source,
+                    1_700_000_000 + index as i64,
+                    100,
+                    *output,
+                    0,
+                    0,
+                    200,
+                    "1",
+                )?;
+                conn.execute(
+                    "UPDATE proxy_request_logs SET latency_ms = ?2, first_token_ms = ?3
+                    WHERE request_id = ?1",
+                    params![id, latency, first],
+                )?;
+            }
+        }
+        let page = db.get_request_logs(&LogFilters::default(), 0, 1)?;
+        let next = db.get_request_logs(&LogFilters::default(), 1, 1)?;
+        assert_eq!(page.total, 4);
+        assert_eq!(page.data.len(), 1);
+        assert_eq!(page.speed_summary, next.speed_summary);
+        assert_eq!(page.speed_summary.output_tokens, 284);
+        assert_eq!(page.speed_summary.total_duration_ms, 15_400);
+        assert_eq!(page.speed_summary.generation_output_tokens, 264);
+        assert_eq!(page.speed_summary.generation_duration_ms, 10_500);
+        let local = db.get_request_logs(
+            &LogFilters {
+                app_type: Some("claude".into()),
+                ..LogFilters::default()
+            },
+            0,
+            1,
+        )?;
+        assert_eq!(local.speed_summary.output_tokens, 84);
+        let conn = lock_conn!(db.conn);
+        let remote =
+            cc_switch_core::UsageService::logs(&*conn, cc_switch_core::LogFilters::default(), 0, 1)
+                .map_err(|error| AppError::Database(error.to_string()))?;
+        assert_eq!(page.speed_summary, remote.speed_summary);
+        Ok(())
+    }
 
     fn local_ts(year: i32, month: u32, day: u32, hour: u32, minute: u32, second: u32) -> i64 {
         match Local.with_ymd_and_hms(year, month, day, hour, minute, second) {
