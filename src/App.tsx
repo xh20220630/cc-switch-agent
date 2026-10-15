@@ -1305,8 +1305,8 @@ function App() {
   };
 
   const renderProviderList = () => {
-    // 上游模式面板控制本机配置文件；远端列表沿用 Agent 的切换流程，
-    // 避免用远端供应商 ID 改写本机直连、路由或聚合设置。
+    // 上游模式面板控制本机配置文件；远端列表沿用 Agent 的单选切换流程。
+    // ProviderList 在缺少 switchMode 时仍须显示切换按钮，不能退化为共存式的添加/移除。
     if (proxyAppId && scope[0] === "local") {
       const startupFailure = startupFailures.find(
         (failure) => failure.appType === proxyAppId,

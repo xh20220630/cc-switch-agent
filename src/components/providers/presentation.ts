@@ -58,7 +58,7 @@ export interface CardButton {
 }
 
 export interface CardPresentation {
-  /** 当前那张：模式色边框 + 淡底；neutral（灰底）只给共存式应用的默认那家（OpenClaw 默认、Hermes 当前） */
+  /** 当前项使用模式色；neutral（灰底）用于远端当前项或共存式应用的默认项。 */
   tone?: CardTone;
   /** 主操作位换成状态文字（使用中 / 路由中 / 当前默认 / 已添加…） */
   status?: { label: string; dot: CardTone | "muted" };
@@ -590,6 +590,56 @@ function buildSwitchSectionsByView(input: SwitchModeInput): ProviderSection[] {
       key: "available",
       title: t("providerCard.section.available", { count: availItems.length }),
       items: availItems,
+    },
+  ];
+}
+
+/**
+ * 远程切换式应用不使用本机模式控制器，按 Agent 返回的唯一 current 展示「使用中 / 切换」。
+ * 不能落入共存式分区：那里默认把这些应用视为已添加，会把切换误画成移除按钮。
+ * 回调只交给既有远程切换链路，不调用本机的直连、路由或聚合动作。
+ */
+export function buildRemoteSwitchSections({
+  t,
+  providers,
+  currentId,
+  onSwitch,
+}: {
+  t: TFunction;
+  providers: Provider[];
+  currentId: string;
+  onSwitch: (provider: Provider) => void;
+}): ProviderSection[] {
+  return [
+    {
+      key: "all",
+      items: providers.map((provider) => ({
+        provider,
+        presentation:
+          provider.id === currentId
+            ? {
+                tone: "neutral",
+                status: {
+                  label: t("providerCard.status.inUse"),
+                  dot: "neutral",
+                },
+                chips: [],
+                buttons: [],
+                deleteDisabledReason: t(
+                  "providerCard.reason.inUseCannotDelete",
+                ),
+              }
+            : {
+                chips: [],
+                buttons: [
+                  {
+                    key: "switch",
+                    label: t("providerCard.action.switch"),
+                    onClick: () => onSwitch(provider),
+                  },
+                ],
+              },
+      })),
     },
   ];
 }

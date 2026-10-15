@@ -1,7 +1,7 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { ReactElement } from "react";
+import { useState, type ReactElement } from "react";
 import { http, HttpResponse } from "msw";
 import type { Provider } from "@/types";
 import {
@@ -38,7 +38,14 @@ vi.mock("@/hooks/useDragSort", () => ({
 vi.mock("@/components/providers/ProviderCard", () => ({
   ProviderCard: (props: any) => {
     providerCardRenderSpy(props);
-    const { provider, presentation, onEdit, onDelete, onDuplicate } = props;
+    const {
+      provider,
+      presentation,
+      onEdit,
+      onDelete,
+      onDuplicate,
+      onExchange,
+    } = props;
 
     return (
       <div data-testid={`provider-card-${provider.id}`}>
@@ -69,6 +76,14 @@ vi.mock("@/components/providers/ProviderCard", () => ({
         >
           duplicate
         </button>
+        {onExchange && (
+          <button
+            data-testid={`exchange-${provider.id}`}
+            onClick={() => onExchange(provider)}
+          >
+            exchange
+          </button>
+        )}
         <button
           data-testid={`delete-${provider.id}`}
           onClick={() => onDelete(provider)}
@@ -194,6 +209,52 @@ describe("ProviderList Component", () => {
 
     expect(container.querySelectorAll(".border-dashed")).toHaveLength(3);
   });
+
+  it.each(["claude", "codex", "gemini", "grokbuild"] as const)(
+    "keeps %s remote switch actions and exchange when local mode props are absent",
+    (appId) => {
+      const a = createProvider({ id: "a", name: "Remote A" });
+      const b = createProvider({ id: "b", name: "Remote B" });
+      const onSwitch = vi.fn();
+      const onExchange = vi.fn();
+      useDragSortMock.mockReturnValue({
+        sortedProviders: [a, b],
+        sensors: [],
+        handleDragEnd: vi.fn(),
+      });
+      function RemoteList() {
+        const [current, setCurrent] = useState("a");
+        return (
+          <ProviderList
+            {...baseProps}
+            appId={appId}
+            providers={{ a, b }}
+            currentProviderId={current}
+            onSwitch={(provider) => {
+              onSwitch(provider);
+              setCurrent(provider.id);
+            }}
+            onExchange={onExchange}
+          />
+        );
+      }
+      renderWithQueryClient(<RemoteList />);
+      expect(screen.getByTestId("status-a")).toHaveTextContent(
+        "providerCard.status.inUse",
+      );
+      expect(screen.queryByTestId("remove-a")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("remove-b")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByTestId("switch-b"));
+      expect(onSwitch).toHaveBeenCalledWith(b);
+      expect(screen.getByTestId("status-b")).toHaveTextContent(
+        "providerCard.status.inUse",
+      );
+      expect(screen.getByTestId("switch-a")).toBeInTheDocument();
+      fireEvent.click(screen.getByTestId("exchange-b"));
+      expect(onExchange).toHaveBeenCalledWith(b);
+      expect(onSwitch).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it("should show empty state and trigger create callback when no providers exist", () => {
     const handleCreate = vi.fn();

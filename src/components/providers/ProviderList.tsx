@@ -48,16 +48,18 @@ import { providerKeys } from "@/lib/query/queries";
 import { extractProviderBaseUrl } from "@/utils/providerConfigUtils";
 import { usePiCurrentState } from "@/lib/query/pi";
 import { isHermesReadOnlyProvider } from "@/config/hermesProviderPresets";
+import { isProxyAppId } from "@/config/appConfig";
 import {
   buildAdditiveSections,
   buildDesktopSections,
+  buildRemoteSwitchSections,
   buildSwitchSections,
   type CardPresentation,
   type ProviderSection,
   type SwitchModeInput,
 } from "@/components/providers/presentation";
 
-/** 切换式应用（Claude Code / Codex / Gemini CLI / Grok Build）的模式状态和动作，由供应商页传入。 */
+/** 本机切换式应用的模式状态和动作；远程列表依据 Agent 的 current 单独展示。 */
 export type SwitchModeProps = Omit<SwitchModeInput, "app" | "t" | "providers">;
 
 interface ProviderListProps {
@@ -80,7 +82,7 @@ interface ProviderListProps {
   onCreate?: () => void;
   /** OpenClaw 的默认模型、Hermes 的当前供应商 */
   onSetAsDefault?: (provider: Provider, modelId?: string) => void;
-  /** 切换式应用必传：按模式 tab 算卡片 */
+  /** 本机切换式应用传入模式 tab；远程不传，按唯一 current 构造切换按钮。 */
   switchMode?: SwitchModeProps;
   isLoading?: boolean;
   /** 搜索面板开关由页头按钮控制时传入；不传则列表自己管（只能 ⌘F 打开） */
@@ -303,6 +305,15 @@ export function ProviderList({
         t,
         providers: filteredProviders,
         queue: switchMode.queue.filter((id) => known.has(id)),
+      });
+    }
+    if (isProxyAppId(appId)) {
+      // 远端不挂本机 SwitchModePanel，但仍是单选切换；缺少模式参数不能解释成共存式应用。
+      return buildRemoteSwitchSections({
+        t,
+        providers: filteredProviders,
+        currentId: currentProviderId,
+        onSwitch,
       });
     }
     if (appId === "claude-desktop") {

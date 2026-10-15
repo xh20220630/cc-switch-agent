@@ -5,6 +5,7 @@ import type { AppMode } from "@/types/proxy";
 import {
   buildAdditiveSections,
   buildDesktopSections,
+  buildRemoteSwitchSections,
   buildSwitchSections,
   type ProviderSection,
   type SwitchModeInput,
@@ -85,6 +86,47 @@ const setDefaultItem = (sections: ProviderSection[], id: string) => {
   if (!found) throw new Error(`no setDefault menu item on ${id}`);
   return found;
 };
+
+describe("buildRemoteSwitchSections", () => {
+  it("shows one remote current and keeps switch actions for every other provider", () => {
+    const onSwitch = vi.fn();
+    const sections = buildRemoteSwitchSections({
+      t,
+      providers: [official, relay, converted],
+      currentId: "relay",
+      onSwitch,
+    });
+    expect(sections.map((section) => section.key)).toEqual(["all"]);
+    expect(item(sections, "relay")).toMatchObject({
+      status: { label: "providerCard.status.inUse" },
+      buttons: [],
+      deleteDisabledReason: "providerCard.reason.inUseCannotDelete",
+    });
+    // 远端的官方项及协议转换项都交由 Agent 处理，不能混入本机模式限制或「移除」。
+    for (const provider of [official, converted]) {
+      expect(
+        item(sections, provider.id).buttons.map((action) => action.key),
+      ).toEqual(["switch"]);
+      button(sections, provider.id, "switch").onClick();
+      expect(onSwitch).toHaveBeenLastCalledWith(provider);
+    }
+  });
+
+  it("keeps every provider switchable when the remote has no current selection", () => {
+    const sections = buildRemoteSwitchSections({
+      t,
+      providers: [relay, backup],
+      currentId: "",
+      onSwitch: vi.fn(),
+    });
+    expect(
+      sections[0].items.every(
+        ({ presentation }) =>
+          !presentation.status && presentation.buttons[0]?.key === "switch",
+      ),
+    ).toBe(true);
+  });
+});
 
 describe("buildSwitchSections — direct", () => {
   it("marks the direct provider in use and asks before switching to one that needs routing", () => {

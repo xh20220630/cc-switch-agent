@@ -22,6 +22,34 @@ async function openMenu(presentation: CardPresentation) {
 }
 
 describe("ProviderCardActions — mode items in the more menu", () => {
+  it("renders the run button beside exchange without substituting either action", async () => {
+    const user = userEvent.setup();
+    const run = vi.fn();
+    const exchange = vi.fn();
+    render(
+      <ProviderCardActions
+        providerName="Remote B"
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onExchange={exchange}
+        presentation={{
+          chips: [],
+          buttons: [
+            { key: "switch", label: "Run remote provider", onClick: run },
+          ],
+        }}
+      />,
+    );
+    const button = screen.getByRole("button", { name: "Run remote provider" });
+    expect(button.querySelector(".lucide-play")).toBeInTheDocument();
+    await user.click(button);
+    expect(run).toHaveBeenCalledTimes(1);
+    await user.click(
+      screen.getByRole("button", { name: "交换 Remote B 到…" }),
+    );
+    expect(exchange).toHaveBeenCalledTimes(1);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
   it("lists them first", async () => {
     const onSelect = vi.fn();
     const { user, menu } = await openMenu({

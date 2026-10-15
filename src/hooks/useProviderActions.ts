@@ -44,6 +44,7 @@ export function useProviderActions(
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const scope = useRuntimeQueryScope();
+  const isLocal = scope[0] === "local";
 
   const addProviderMutation = useAddProviderMutation(activeApp);
   const updateProviderMutation = useUpdateProviderMutation(activeApp);
@@ -53,7 +54,8 @@ export function useProviderActions(
   // Claude 插件同步逻辑
   const syncClaudePlugin = useCallback(
     async (provider: Provider) => {
-      if (activeApp !== "claude") return;
+      // 插件配置属于桌面本机，点击远端供应商不能顺带覆盖本机 Claude 插件设置。
+      if (activeApp !== "claude" || !isLocal) return;
 
       try {
         const settings = await settingsApi.get();
@@ -74,7 +76,7 @@ export function useProviderActions(
         toast.error(detail, { duration: 4200 });
       }
     },
-    [activeApp, t],
+    [activeApp, isLocal, t],
   );
 
   // 添加供应商
@@ -174,6 +176,8 @@ export function useProviderActions(
       // 其余应用必须开启当前应用的 takeover（只看全局进程会漏判别的应用已接管的情况）。
       // 确认框 F 里选了「仍然直连切换」的不再重复提醒。
       const routingReady =
+        // Agent 负责远端投影；本机接管状态不能给远端切换弹错提示或阻止官方项。
+        !isLocal ||
         activeApp === "claude-desktop" ||
         isProxyTakeover === true ||
         options?.acknowledgedRouting === true;
@@ -201,6 +205,7 @@ export function useProviderActions(
         provider,
       );
       if (
+        isLocal &&
         isProxyTakeover &&
         provider.category === "official" &&
         !officialSupportsTakeover
@@ -290,7 +295,14 @@ export function useProviderActions(
         // 错误提示由 mutation 处理
       }
     },
-    [switchProviderMutation, syncClaudePlugin, activeApp, isProxyTakeover, t],
+    [
+      switchProviderMutation,
+      syncClaudePlugin,
+      activeApp,
+      isProxyTakeover,
+      isLocal,
+      t,
+    ],
   );
 
   // 删除供应商

@@ -147,6 +147,56 @@ beforeEach(() => {
 });
 
 describe("useProviderActions", () => {
+  it("switches remote Claude without applying local takeover rules or plugin configuration", async () => {
+    setRuntimeSnapshot({
+      status: "online",
+      activeTargetId: "qa-host",
+      generation: 1,
+    });
+    settingsApiGetMock.mockResolvedValue({
+      enableClaudePluginIntegration: true,
+    });
+    switchProviderMutateAsync.mockResolvedValue({ warnings: [] });
+    const { wrapper } = createWrapper();
+    const { result } = renderHook(() => useProviderActions("claude", true), {
+      wrapper,
+    });
+    const official = createProvider({
+      id: "remote-official",
+      category: "official",
+    });
+    await act(async () => {
+      await result.current.switchProvider(official);
+    });
+    expect(switchProviderMutateAsync).toHaveBeenCalledWith(official);
+    expect(settingsApiGetMock).not.toHaveBeenCalled();
+    expect(settingsApiApplyMock).not.toHaveBeenCalled();
+    expect(toastErrorMock).not.toHaveBeenCalled();
+    expect(toastWarningMock).not.toHaveBeenCalled();
+  });
+
+  it("does not warn about local proxy mode when switching remote protocol providers", async () => {
+    setRuntimeSnapshot({
+      status: "online",
+      activeTargetId: "qa-host",
+      generation: 1,
+    });
+    switchProviderMutateAsync.mockResolvedValue({ warnings: [] });
+    const provider = createProvider({
+      category: "custom",
+      meta: { apiFormat: "openai_responses" },
+    });
+    const { wrapper } = createWrapper();
+    const { result } = renderHook(() => useProviderActions("claude", false), {
+      wrapper,
+    });
+    await act(async () => {
+      await result.current.switchProvider(provider);
+    });
+    expect(switchProviderMutateAsync).toHaveBeenCalledWith(provider);
+    expect(toastWarningMock).not.toHaveBeenCalled();
+    expect(settingsApiGetMock).not.toHaveBeenCalled();
+  });
   it("should trigger mutation when calling addProvider", async () => {
     addProviderMutateAsync.mockResolvedValueOnce(undefined);
     const { wrapper } = createWrapper();
