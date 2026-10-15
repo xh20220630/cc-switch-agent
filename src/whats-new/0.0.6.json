@@ -1,0 +1,19 @@
+{
+  "version": "0.0.6",
+  "items": [
+    {
+      "type": "fix",
+      "zh": "恢复远程供应商行的运行按钮与使用中状态，保留交换入口",
+      "zh-TW": "恢復遠端供應商列的執行按鈕與使用中狀態，保留交換入口",
+      "en": "Restore remote provider run buttons and current status while keeping the exchange action",
+      "ja": "リモート接続先の実行ボタンと使用中表示を復元し、交換操作も維持"
+    },
+    {
+      "type": "fix",
+      "zh": "远程切换不再受本机接管限制，也不会改写本机 Claude 插件设置",
+      "zh-TW": "遠端切換不再受本機接管限制，也不會改寫本機 Claude 外掛設定",
+      "en": "Remote switching no longer uses local takeover rules or changes local Claude plugin settings",
+      "ja": "リモート切り替えへの本機側の制限適用と Claude プラグイン設定の上書きを修正"
+    }
+  ]
+}
