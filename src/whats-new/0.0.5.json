@@ -1,0 +1,33 @@
+{
+  "version": "0.0.5",
+  "items": [
+    {
+      "type": "fix",
+      "zh": "修复远程供应商误选与并发切换后的配置不一致",
+      "zh-TW": "修復遠端供應商誤選與並行切換後的設定不一致",
+      "en": "Fix remote provider selection and keep settings consistent during concurrent switches",
+      "ja": "リモート接続先の誤選択と同時切り替え後の設定不整合を修正"
+    },
+    {
+      "type": "new",
+      "zh": "供应商行新增交换入口，可复制到不同应用和远程主机",
+      "zh-TW": "供應商列新增交換入口，可複製到不同應用程式與遠端主機",
+      "en": "Exchange providers from each row by copying them to another app or remote host",
+      "ja": "各プロバイダー行から別のアプリやリモートホストへコピー可能に"
+    },
+    {
+      "type": "improve",
+      "zh": "请求日志显示首字、总耗时和速度，底部汇总总 TPK",
+      "zh-TW": "請求日誌顯示首字、總耗時與速度，底部彙總總 TPK",
+      "en": "Request logs show first-token time, duration, speed and a total TPK summary",
+      "ja": "リクエストログに初回トークン時間、所要時間、速度と合計 TPK を表示"
+    },
+    {
+      "type": "fix",
+      "zh": "编辑未启用供应商不再切换当前项，代理重启后恢复远端路由",
+      "zh-TW": "編輯未啟用供應商不再切換目前項目，代理重啟後恢復遠端路由",
+      "en": "Inactive provider edits preserve selection, and remote routes survive proxy restarts",
+      "ja": "未使用プロバイダーの編集で選択を維持し、プロキシ再起動後も接続先を保持"
+    }
+  ]
+}
