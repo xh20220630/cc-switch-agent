@@ -68,13 +68,27 @@ impl ProxyState {
 }
 
 impl ProxyServer {
+    #[cfg(test)]
     pub fn new(
         config: ProxyConfig,
         db: Arc<Database>,
         app_handle: Option<tauri::AppHandle>,
     ) -> Self {
+        Self::with_remote_routes(config, db, app_handle, Default::default())
+    }
+
+    /// 业务服务复用远程路由表，避免停止/重启 HTTP 服务时丢失隧道的供应商选择。
+    pub(crate) fn with_remote_routes(
+        config: ProxyConfig,
+        db: Arc<Database>,
+        app_handle: Option<tauri::AppHandle>,
+        remote_routes: super::provider_router::RemoteProviderRoutes,
+    ) -> Self {
         // 创建共享的 ProviderRouter（熔断器状态将跨所有请求保持）
-        let provider_router = Arc::new(ProviderRouter::new(db.clone()));
+        let provider_router = Arc::new(ProviderRouter::with_remote_routes(
+            db.clone(),
+            remote_routes,
+        ));
         // 创建故障转移切换管理器
         let failover_manager = Arc::new(FailoverSwitchManager::new());
 
@@ -296,15 +310,6 @@ impl ProxyServer {
         );
     }
 
-    /// 更新远程隧道请求的 current provider（经 SSH 转发, base_url 带 /remote 前缀）。
-    /// 与本地 current 完全隔离, 由远程切换/编辑时同步。
-    pub async fn set_remote_current(&self, app_type: &str, provider_id: &str) {
-        self.state
-            .provider_router
-            .set_remote_current(app_type, provider_id.to_string())
-            .await;
-    }
-
     fn build_router(&self) -> Router {
         Router::new()
             // 健康检查
@@ -502,6 +507,92 @@ mod tests {
         path_and_query: String,
         authorization: Option<String>,
         body: Value,
+    }
+
+    /// 真正经过 /remote HTTP 入口，验证远端密钥更新与路由缺失，禁止借用本机故障转移。
+    #[tokio::test]
+    async fn claude_remote_http_uses_updated_remote_key_and_never_local_fallback() {
+        let captured = Arc::new(Mutex::new(Vec::<String>::new()));
+        let capture = captured.clone();
+        let upstream = Router::new().route("/v1/messages", post(move |headers: HeaderMap| {
+            let capture = capture.clone();
+            async move {
+                capture.lock().await.push(headers.get("x-api-key").unwrap().to_str().unwrap().into());
+                axum::Json(json!({"id":"msg-test", "type":"message", "role":"assistant", "model":"test-model",
+                    "content":[{"type":"text","text":"OK"}], "stop_reason":"end_turn", "stop_sequence":null,
+                    "usage":{"input_tokens":1,"output_tokens":1}}))
+            }
+        }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let upstream_task = tokio::spawn(async move {
+            axum::serve(listener, upstream).await.unwrap();
+        });
+        let db = Arc::new(Database::memory().unwrap());
+        let provider = |key: &str| {
+            Provider::with_id(
+                "same-id".into(),
+                "Test".into(),
+                json!({"env": {
+                    "ANTHROPIC_BASE_URL":format!("http://{address}"), "ANTHROPIC_API_KEY":key,
+                    "ANTHROPIC_MODEL":"test-model"
+                }}),
+                None,
+            )
+        };
+        db.save_provider("claude", &provider("local-key")).unwrap();
+        db.set_current_provider("claude", "same-id").unwrap();
+        db.add_to_failover_queue("claude", "same-id").unwrap();
+        let mut app_config = db.get_proxy_config_for_app("claude").await.unwrap();
+        app_config.auto_failover_enabled = true;
+        db.update_proxy_config_for_app(app_config).await.unwrap();
+        let remote_routes = super::super::provider_router::RemoteProviderRoutes::default();
+        let proxy = ProxyServer::with_remote_routes(
+            ProxyConfig {
+                listen_port: 0,
+                ..Default::default()
+            },
+            db,
+            None,
+            remote_routes.clone(),
+        );
+        let port = proxy.start().await.unwrap().port;
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let send = || {
+            client.post(format!("http://127.0.0.1:{port}/remote/v1/messages"))
+            .header("x-api-key", "PROXY_MANAGED")
+            .header("anthropic-version", "2023-06-01")
+            .json(&json!({"model":"test-model","max_tokens":8,"messages":[{"role":"user","content":"OK"}]})).send()
+        };
+        // 尚未建连的路由直接拒绝，上游一次也不能收到本机凭据。
+        assert_eq!(
+            send().await.unwrap().status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert!(captured.lock().await.is_empty());
+        for key in ["remote-key-before", "remote-key-after"] {
+            remote_routes
+                .write()
+                .await
+                .insert("claude".into(), provider(key));
+            let response = send().await.unwrap();
+            let status = response.status();
+            let body = response.text().await.unwrap();
+            assert_eq!(status, StatusCode::OK, "{body}");
+            assert_eq!(captured.lock().await.last().unwrap(), key);
+        }
+        remote_routes.write().await.clear();
+        assert_eq!(
+            send().await.unwrap().status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert_eq!(captured.lock().await.len(), 2);
+        proxy.stop().await.unwrap();
+        upstream_task.abort();
     }
 
     /// Codex 内置的 openai 先用 WebSocket 连 Responses：握手回 426 它才立刻改走 HTTP。

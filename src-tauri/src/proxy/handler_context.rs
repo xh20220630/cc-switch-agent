@@ -157,7 +157,18 @@ impl RequestContext {
                     .provider_router
                     .current_provider(app_type_str, is_remote)
                     .await
-                    .map_err(|error| ProxyError::DatabaseError(error.to_string()))?;
+                    .map_err(|error| {
+                        if is_remote {
+                            match error {
+                                crate::error::AppError::RemoteRouteUnavailable => {
+                                    ProxyError::RemoteRouteUnavailable
+                                }
+                                error => ProxyError::DatabaseError(error.to_string()),
+                            }
+                        } else {
+                            ProxyError::DatabaseError(error.to_string())
+                        }
+                    })?;
                 let current_provider_id = current_provider
                     .as_ref()
                     .map(|provider| provider.id.clone())
@@ -175,7 +186,8 @@ impl RequestContext {
                 let stack_mode = !is_remote
                     && app_config.auto_failover_enabled
                     && crate::mode::stack::stack_mode_now(&app_type);
-                let providers = if stack_mode {
+                let providers = if is_remote || stack_mode {
+                    // 远端和 Stack 都固定使用各自当前项，不能借用本机路由的故障转移队列。
                     app_config.auto_failover_enabled = false;
                     vec![current_provider.ok_or(ProxyError::NoProvidersConfigured)?]
                 } else {

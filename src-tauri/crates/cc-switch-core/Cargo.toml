@@ -9,6 +9,8 @@ publish = false
 cc-switch-protocol = { path = "../cc-switch-protocol" }
 chrono = "0.4"
 indexmap = { version = "2", features = ["serde"] }
+# 同一 HOME 可同时被多个 SSH Agent 打开，操作锁必须跨进程覆盖数据库和 live 写入。
+fs2 = "0.4.3"
 rusqlite = { version = "0.31", features = ["backup", "bundled"] }
 rust_decimal = "1.36"
 serde = { version = "1.0", features = ["derive"] }

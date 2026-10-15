@@ -63,6 +63,9 @@ pub enum AppError {
     AllProvidersCircuitOpen,
     #[error("未配置供应商")]
     NoProvidersConfigured,
+    /// 远程绑定缺失或正在切换时显式失败，允许客户端稍后重试，绝不回退本机。
+    #[error("远程供应商路由尚未就绪，请稍后重试或重新连接目标主机")]
+    RemoteRouteUnavailable,
 }
 
 impl AppError {

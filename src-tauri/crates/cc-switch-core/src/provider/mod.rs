@@ -1,5 +1,6 @@
 pub mod live;
 mod model;
+mod operation_lock;
 mod repository;
 
 use crate::{CoreError, HeadlessState};
@@ -16,11 +17,14 @@ impl ProviderService {
         state: &HeadlessState,
         app: &str,
     ) -> Result<indexmap::IndexMap<String, ProviderRecord>, CoreError> {
+        // 等待在途投影完成，避免 UI 读到已提交但尚未生效的中间状态。
+        let _operation = operation_lock::acquire(state)?;
         repository::list(state, app)
     }
 
     /// 返回指定应用的当前 Provider ID；尚未配置时保持既有空字符串协议。
     pub fn current(state: &HeadlessState, app: &str) -> Result<String, CoreError> {
+        let _operation = operation_lock::acquire(state)?;
         repository::current(state, app)
     }
 
@@ -31,6 +35,7 @@ impl ProviderService {
         provider: ProviderRecord,
         add_to_live: bool,
     ) -> Result<bool, CoreError> {
+        let _operation = operation_lock::acquire(state)?;
         let had_current = !repository::current(state, app)?.is_empty();
         let projected_provider = provider.clone();
         let added = repository::add(state, app, provider, add_to_live)?;
@@ -61,6 +66,8 @@ impl ProviderService {
         provider: ProviderRecord,
         projected: Option<ProviderRecord>,
     ) -> Result<bool, CoreError> {
+        // current 判断、数据库更新和 live 投影必须属于同一临界区，避免编辑和切换交错。
+        let _operation = operation_lock::acquire(state)?;
         let is_current = repository::current(state, app)? == original_id;
         let updated = repository::update(state, app, original_id, provider.clone())?;
         if is_current && should_project_implicitly(state, app) {
@@ -76,6 +83,7 @@ impl ProviderService {
 
     /// 删除非当前 Provider；当前项必须先切换，防止目标 CLI 失去可追踪的配置来源。
     pub fn delete(state: &HeadlessState, app: &str, id: &str) -> Result<(), CoreError> {
+        let _operation = operation_lock::acquire(state)?;
         repository::delete(state, app, id)
     }
 
@@ -101,6 +109,8 @@ impl ProviderService {
         id: &str,
         projected: Option<ProviderRecord>,
     ) -> Result<SwitchResult, CoreError> {
+        // 锁一直持有到 live 完成；只锁 SQLite 事务会让较早请求最后覆盖配置文件。
+        let _operation = operation_lock::acquire(state)?;
         let context = live_context(state);
         // 条件能力必须在事务前检查；Linux 不可写 Claude Desktop 时数据库保持原 current。
         live::ensure_projection_supported(&context, app)?;
@@ -117,6 +127,7 @@ impl ProviderService {
         app: &str,
         updates: &[ProviderSortUpdate],
     ) -> Result<(), CoreError> {
+        let _operation = operation_lock::acquire(state)?;
         repository::update_sort_order(state, app, updates)
     }
 }

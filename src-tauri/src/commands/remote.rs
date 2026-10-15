@@ -1,6 +1,5 @@
 use serde::Serialize;
 use serde_json::Value;
-use std::str::FromStr;
 use tauri::{Emitter, Manager, State};
 
 use crate::remote::models::{RemoteRuntimeSnapshot, RemoteTargetConfig};
@@ -127,6 +126,15 @@ pub async fn remote_set_active_target(
     #[allow(non_snake_case)] targetId: Option<String>,
     password: Option<String>,
 ) -> Result<RemoteRuntimeSnapshot, String> {
+    let runtime = app_handle.state::<RemoteRuntimeState>();
+    let _operation = runtime.lock_provider_operations().await;
+    if targetId.is_some() {
+        app_handle
+            .state::<AppState>()
+            .proxy_service
+            .clear_remote_routes()
+            .await;
+    }
     // 桌面代理运行时，把远端 CLI 的本地路由请求经 SSH 隧道送回桌面代理，
     // 否则"本地路由"型供应商在远端会因 127.0.0.1:{port} 无人监听而失败。
     let forward = match targetId.as_deref() {
@@ -162,6 +170,18 @@ pub async fn remote_set_active_target(
         .state::<RemoteRuntimeState>()
         .snapshot()
         .map_err(serialize_error)?;
+    // 建连即恢复远端当前路由，不要求用户再点一次切换。这里只读远端，不改写任何 CLI 配置。
+    let mut route_error = None;
+    if target_id_connected && result.is_ok() {
+        for app in ["claude", "codex", "gemini", "grokbuild"] {
+            if let Err(error) =
+                refresh_remote_provider_route(&app_handle, snapshot.generation, app).await
+            {
+                log::warn!("[remote] 初始化 {app} 路由失败: {error}");
+                route_error = Some(error);
+            }
+        }
+    }
     let _ = app_handle.emit("remote-runtime-status", &snapshot);
 
     // 连接成功后自动触发一次远端会话用量同步：桌面本机会话同步依赖进程内 60 秒
@@ -191,7 +211,13 @@ pub async fn remote_set_active_target(
         });
     }
 
-    result.map_err(serialize_error)
+    let snapshot = result.map_err(serialize_error)?;
+    if let Some(error) = route_error {
+        return Err(format!(
+            "远程已连接，但供应商路由初始化失败，请重新连接：{error}"
+        ));
+    }
+    Ok(snapshot)
 }
 
 #[tauri::command]
@@ -201,69 +227,62 @@ pub async fn remote_invoke(
     #[allow(non_snake_case)] args: Value,
     generation: u64,
 ) -> Result<Value, String> {
-    // 本地路由模式：桌面代理运行中时，远程切换 provider 必须让远程 CLI 把请求
-    // 打到 SSH 隧道(127.0.0.1:15721)送回桌面代理，由代理用 DB 真实 key 按
-    // x-api-key 转发，否则直连网关会因 AUTH_TOKEN→Bearer 与网关不兼容而 401。
-    // 因此在此改写投影快照并随命令下发，远端 DB 的原始配置保持不变。
-    let (args, remote_provider_sync) =
-        maybe_rewrite_provider_switch_for_remote_proxy(&app_handle, &command, args).await;
-    // provider.delete 的定位参数在 args 被 move 进远程任务前提取。
-    let deleted_provider_ref = if command == "provider.delete" {
-        Some((
-            args.get("app").and_then(Value::as_str).map(str::to_string),
-            args.get("id")
-                .or_else(|| args.get("originalId"))
-                .and_then(Value::as_str)
-                .map(str::to_string),
-        ))
+    // generation 在任何读取/改写前校验；同一桌面连接的写入和路由确认不可交错。
+    let runtime = app_handle.state::<RemoteRuntimeState>();
+    let _operation = if command.starts_with("provider.") {
+        Some(runtime.lock_provider_operations().await)
     } else {
         None
     };
-    let result = {
-        let app_handle = app_handle.clone();
-        tauri::async_runtime::spawn_blocking(move || {
-            app_handle
-                .state::<RemoteRuntimeState>()
-                .invoke_remote(generation, &command, args)
-                .map_err(serialize_error)
-        })
-        .await
-        .map_err(|error| format!("远程命令任务失败: {error}"))?
+    runtime
+        .require_generation(generation)
+        .map_err(serialize_error)?;
+    let app = args.get("app").and_then(Value::as_str).map(str::to_string);
+    let mutation = matches!(
+        command.as_str(),
+        "provider.add" | "provider.update" | "provider.switch" | "provider.delete"
+    );
+    let args = prepare_remote_provider_args(&app_handle, generation, &command, args).await?;
+    let deleted_id = if command == "provider.delete" {
+        args.get("id").and_then(Value::as_str).map(str::to_string)
+    } else {
+        None
     };
-
-    // 远程切换成功后，把 provider 同步进桌面 DB 并设为 current，让本地代理能
-    // 按该 provider 的真实配置转发（远程模式的数据在远端 DB，桌面代理看不到）。
-    if result.is_ok() {
-        if let Some(sync) = remote_provider_sync {
-            let state = app_handle.state::<AppState>();
-            match sync_provider_to_local_proxy(&state, sync).await {
-                Ok(()) => log::info!("[remote] 已同步远程 provider 到桌面代理路由"),
-                Err(error) => log::warn!("[remote] 同步远程 provider 到桌面代理失败: {error}"),
-            }
-        } else if let Some((Some(app), Some(id))) = deleted_provider_ref {
-            // 远程删除 provider 后，同步清理桌面 DB 的影子记录(remoteSynced)，
-            // 否则代理转发失去凭据来源且记录永久残留。
-            let state = app_handle.state::<AppState>();
-            match state.db.get_provider_by_id(&id, &app) {
-                Ok(Some(provider))
-                    if provider
-                        .meta
-                        .as_ref()
-                        .and_then(|meta| meta.remote_synced)
-                        .unwrap_or(false) =>
-                {
-                    match state.db.delete_provider(&app, &id) {
-                        Ok(_) => log::info!("[remote] 已清理远程 provider 的桌面影子记录 `{id}`"),
-                        Err(error) => {
-                            log::warn!("[remote] 清理远程 provider 影子记录失败: {error}")
-                        }
-                    }
-                }
-                Ok(_) => {}
-                Err(error) => log::warn!("[remote] 读取待清理的影子 provider 失败: {error}"),
+    if mutation {
+        if let Some(app) = app.as_deref() {
+            // 写入期间宁可明确提示稍后重试，也不能让新模型请求带着旧供应商凭据出站。
+            app_handle
+                .state::<AppState>()
+                .proxy_service
+                .set_remote_current(app, None)
+                .await;
+        }
+    }
+    let result = invoke_agent(&app_handle, generation, &command, args).await;
+    if result.is_ok() && mutation {
+        if let Some(app) = app.as_deref() {
+            // 重新读取实际 current，不能把刚编辑的非当前供应商当作当前项。
+            refresh_remote_provider_route(&app_handle, generation, app)
+                .await
+                .map_err(|error| {
+                    format!("远端操作已完成，但代理路由同步失败，请重新连接目标主机：{error}")
+                })?;
+            if let Some(id) = deleted_id {
+                let target = runtime
+                    .snapshot()
+                    .map_err(serialize_error)?
+                    .active_target_id
+                    .ok_or("远程目标未连接")?;
+                // 只清理当前主机命名空间中的影子，不影响本机同 ID 的卡片。
+                app_handle
+                    .state::<AppState>()
+                    .db
+                    .delete_provider(app, &format!("remote:{target}:{id}"))
+                    .map_err(|error| format!("清理远程供应商影子失败: {error}"))?;
             }
         }
     }
+    // 失败可能发生在 DB 已提交、live 未完成之后；保持路由撤销，禁止继续使用旧凭据。
     result
 }
 
@@ -285,179 +304,221 @@ pub async fn remote_invoke_provider_target(
     .map_err(|error| format!("供应商交换远程任务失败: {error}"))?
 }
 
-/// 把远程切换的 provider 注册进桌面 DB 并设为"远程 current"，供本地代理转发。
-/// 与本地 current 完全隔离：不调用 set_current_provider，避免覆盖本地选择。
-async fn sync_provider_to_local_proxy(
-    state: &tauri::State<'_, AppState>,
-    sync: RemoteProviderSync,
+/// 所有远程读取沿用命令传入的 generation，不能在等待 SSH 时悄悄跟随新主机。
+async fn invoke_agent(
+    app_handle: &tauri::AppHandle,
+    generation: u64,
+    command: &str,
+    args: Value,
+) -> Result<Value, String> {
+    let handle = app_handle.clone();
+    let command = command.to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        handle
+            .state::<RemoteRuntimeState>()
+            .invoke_remote(generation, &command, args)
+            .map_err(serialize_error)
+    })
+    .await
+    .map_err(|error| format!("远程命令任务失败: {error}"))?
+}
+
+/// 从远端规范数据确认选择，使用目标主机命名空间保存影子记录，避免覆盖本机同 ID 的卡片。
+async fn refresh_remote_provider_route(
+    app_handle: &tauri::AppHandle,
+    generation: u64,
+    app: &str,
 ) -> Result<(), String> {
-    let mut provider = sync.provider;
-    // 标记为远程同步条目：桌面代理接管恢复时不能把本地 live 的 token 覆盖进来
-    // （本地 live 可能是其它 provider 的占位/真实 token，覆盖会导致代理转发 401）。
-    if let Some(meta) = provider.meta.as_mut() {
-        meta.remote_synced = Some(true);
-    } else {
-        provider.meta = Some(crate::provider::ProviderMeta {
-            remote_synced: Some(true),
-            ..Default::default()
-        });
+    let current = invoke_agent(
+        app_handle,
+        generation,
+        "provider.current",
+        serde_json::json!({"app": app}),
+    )
+    .await?;
+    let providers = invoke_agent(
+        app_handle,
+        generation,
+        "provider.list",
+        serde_json::json!({"app": app}),
+    )
+    .await?;
+    let provider = remote_current_provider(&current, &providers)?;
+    let runtime = app_handle.state::<RemoteRuntimeState>();
+    runtime
+        .require_generation(generation)
+        .map_err(serialize_error)?;
+    let target = runtime
+        .snapshot()
+        .map_err(serialize_error)?
+        .active_target_id
+        .ok_or("远程目标未连接")?;
+    let state = app_handle.state::<AppState>();
+    let provider = provider.map(|mut provider| {
+        provider.id = format!("remote:{target}:{}", provider.id);
+        // 影子只用于远程转发和日志归因，不能加入本机故障转移队列。
+        provider.in_failover_queue = false;
+        provider
+            .meta
+            .get_or_insert_with(Default::default)
+            .remote_synced = Some(true);
+        provider
+    });
+    if let Some(provider) = provider.as_ref() {
+        // 日志需要 DB 中的名称与归因信息，路由本身直接持有完整快照，不依赖本机 current。
+        state
+            .db
+            .save_provider(app, provider)
+            .map_err(|error| format!("保存远程影子供应商失败: {error}"))?;
     }
-    // save_provider 为 upsert：桌面无此 id 时插入，已有(可能是旧同步记录)时全量更新。
-    state
-        .db
-        .save_provider(&sync.app_type, &provider)
-        .map_err(|e| format!("保存 provider 到桌面 DB 失败: {e}"))?;
-    // 仅更新"远程 current"(代理按 /remote 前缀请求用它)，不触碰本地 current。
-    state
-        .proxy_service
-        .set_remote_current(&sync.app_type, &provider.id)
-        .await;
+    state.proxy_service.set_remote_current(app, provider).await;
     Ok(())
 }
 
-/// 远程切换成功后需要同步到桌面代理的 provider 信息。
-struct RemoteProviderSync {
-    app_type: String,
-    provider: crate::provider::Provider,
+/// 空 current 是合法的未配置状态；悬空或格式错误必须拒绝，不能猜测本机供应商。
+fn remote_current_provider(
+    current: &Value,
+    providers: &Value,
+) -> Result<Option<crate::provider::Provider>, String> {
+    let id = current.as_str().ok_or("远程 current 返回格式错误")?;
+    if id.is_empty() {
+        return Ok(None);
+    }
+    let value = providers
+        .get(id)
+        .ok_or("远程当前供应商不存在，请重新连接目标主机")?;
+    let provider: crate::provider::Provider =
+        serde_json::from_value(value.clone()).map_err(|_| "远程供应商返回格式错误".to_string())?;
+    if provider.id != id {
+        return Err("远程供应商 ID 不一致".into());
+    }
+    Ok(Some(provider))
 }
 
-/// 远程 `provider.switch`/`provider.update` 且桌面代理运行中时，改写 provider
-/// 快照指向桌面代理。返回 (改写后的 args, 需要同步到桌面代理的原始 provider)。
-async fn maybe_rewrite_provider_switch_for_remote_proxy(
+/// Claude 代理投影与规范配置分开：切换的源从远端读取，编辑的源是用户提交的完整配置。
+/// 其他应用保持各自现有 writer 语义，不能往 Gemini 等配置误塞 ANTHROPIC 字段。
+async fn prepare_remote_provider_args(
     app_handle: &tauri::AppHandle,
+    generation: u64,
     command: &str,
     args: Value,
-) -> (Value, Option<RemoteProviderSync>) {
-    let command = match command {
-        "provider.switch" => command,
-        // 远程编辑当前 provider 时, agent 端 update 也会投影 live; 若桌面代理
-        // 运行中同样需要改写为本地路由, 避免直连网关认证头不兼容。
-        "provider.update" => command,
-        _ => {
-            log::debug!("[remote] 跳过本地路由改写: 命令 {command}");
-            return (args, None);
-        }
-    };
-    let Some(app_type) = args.get("app").and_then(Value::as_str) else {
-        log::warn!("[remote] 跳过本地路由改写: {command} 缺少 app 参数");
-        return (args, None);
-    };
-    let Some(id) = args
-        .get("id")
-        .or_else(|| args.get("originalId"))
-        .and_then(Value::as_str)
-    else {
-        log::warn!("[remote] 跳过本地路由改写: {command} 缺少 id 参数");
-        return (args, None);
-    };
-    let Ok(app_type) = crate::AppType::from_str(app_type) else {
-        log::warn!("[remote] 跳过本地路由改写: 未知 app 类型 {app_type}");
-        return (args, None);
-    };
-    let Ok(status) = app_handle
+) -> Result<Value, String> {
+    if !matches!(command, "provider.switch" | "provider.update")
+        || args.get("app").and_then(Value::as_str) != Some("claude")
+    {
+        return Ok(args);
+    }
+    let status = app_handle
         .state::<AppState>()
         .proxy_service
         .get_status()
-        .await
-    else {
-        log::warn!("[remote] 跳过本地路由改写: 读取桌面代理状态失败");
-        return (args, None);
-    };
+        .await?;
     if !status.running || status.port == 0 {
-        log::info!(
-            "[remote] 跳过本地路由改写: 桌面代理未运行 (running={}, port={})",
-            status.running,
-            status.port
-        );
-        return (args, None);
+        return Ok(args);
     }
-    // provider.update / provider.switch 的 payload 均可自带完整 provider(前端持有
-    // 远程 provider 数据), 优先基于它改写, 避免依赖桌面 DB(远程模式数据在远端)。
-    let provider_value = args.get("provider").cloned();
-    let mut sync_provider = provider_value.clone();
-    let mut provider_value = match provider_value {
-        Some(value) => value,
-        None => match app_handle
-            .state::<AppState>()
-            .db
-            .get_provider_by_id(id, app_type.as_str())
-            .ok()
-            .flatten()
-        {
-            Some(provider) => {
-                sync_provider = serde_json::to_value(&provider).ok();
-                match serde_json::to_value(provider) {
-                    Ok(value) => value,
-                    Err(error) => {
-                        log::warn!(
-                            "[remote] 跳过本地路由改写: provider `{id}` 序列化失败: {error}"
-                        );
-                        return (args, None);
-                    }
-                }
-            }
-            None => {
-                log::warn!("[remote] 跳过本地路由改写: 桌面 DB 未找到 provider `{id}`");
-                return (args, None);
-            }
-        },
+    let provider = if command == "provider.update" {
+        args.get("provider")
+            .cloned()
+            .ok_or("编辑供应商缺少完整配置")?
+    } else {
+        let id = args
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or("切换供应商缺少 ID")?;
+        let providers = invoke_agent(
+            app_handle,
+            generation,
+            "provider.list",
+            serde_json::json!({"app": "claude"}),
+        )
+        .await?;
+        providers.get(id).cloned().ok_or("远程供应商不存在")?
     };
-    let Some(settings) = provider_value.get_mut("settingsConfig") else {
-        log::warn!("[remote] 跳过本地路由改写: provider `{id}` 缺少 settingsConfig");
-        return (args, None);
+    project_remote_claude_args(command, args, provider, status.port)
+}
+
+/// 投影只改变远端 live，真实密钥仍落在远端 DB；没有 env 的官方配置继续使用原生认证。
+fn project_remote_claude_args(
+    command: &str,
+    mut args: Value,
+    mut provider: Value,
+    port: u16,
+) -> Result<Value, String> {
+    let Some(env) = provider
+        .get_mut("settingsConfig")
+        .and_then(|settings| settings.get_mut("env"))
+        .and_then(Value::as_object_mut)
+    else {
+        return Ok(args);
     };
-    let Some(env) = settings.get_mut("env").and_then(Value::as_object_mut) else {
-        log::warn!("[remote] 跳过本地路由改写: provider `{id}` settingsConfig 缺少 env 对象");
-        return (args, None);
-    };
-    // 与桌面代理接管语义一致：base_url 指向本地代理，token 替换为占位符，
-    // 代理侧从 DB 读取真实凭据并按 provider 的 apiKeyField 选择 x-api-key。
-    // `/remote` 路径前缀标记远程来源：桌面代理据此按"远程 current"转发，
-    // 与本地请求(无前缀,按本地 current)隔离。
-    let proxy_base_url = format!("http://127.0.0.1:{}{}", status.port, REMOTE_ROUTE_PREFIX);
     env.insert(
-        "ANTHROPIC_BASE_URL".to_string(),
-        Value::String(proxy_base_url.clone()),
+        "ANTHROPIC_BASE_URL".into(),
+        Value::String(format!("http://127.0.0.1:{port}{REMOTE_ROUTE_PREFIX}")),
     );
     for key in ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"] {
         if env.contains_key(key) {
-            env.insert(key.to_string(), Value::String("PROXY_MANAGED".to_string()));
+            env.insert(key.into(), Value::String("PROXY_MANAGED".into()));
         }
     }
-    log::info!(
-        "[remote] {command} `{id}` 已改写为本地路由: {}",
-        proxy_base_url
+    let object = args.as_object_mut().ok_or("供应商参数必须为对象")?;
+    object.insert(
+        if command == "provider.update" {
+            "projected"
+        } else {
+            "provider"
+        }
+        .into(),
+        provider,
     );
-    let mut rewritten = args;
-    if let Some(object) = rewritten.as_object_mut() {
-        // switch: 快照即投影本体; update: 原始 provider 留在 `provider`(落盘 DB),
-        // 改写快照放入 `projected`(仅用于 live 投影)。
-        match command {
-            "provider.update" => {
-                object.insert("projected".to_string(), provider_value);
-            }
-            _ => {
-                object.insert("provider".to_string(), provider_value);
-            }
-        }
+    Ok(args)
+}
+
+#[cfg(test)]
+mod provider_route_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn provider(id: &str) -> Value {
+        json!({"id": id, "name": id, "settingsConfig": {"env": {
+            "ANTHROPIC_BASE_URL": "https://remote.example.com",
+            "ANTHROPIC_API_KEY": "remote-secret", "ANTHROPIC_MODEL": "remote-model"
+        }}, "inFailoverQueue": false})
     }
-    let sync = match (sync_provider, command) {
-        // update 时同步用户编辑后的原始 provider; switch 时同步桌面 DB 原始记录。
-        (Some(provider_value), _) => {
-            match serde_json::from_value::<crate::provider::Provider>(provider_value) {
-                Ok(provider) => Some(RemoteProviderSync {
-                    app_type: app_type.as_str().to_string(),
-                    provider,
-                }),
-                Err(error) => {
-                    log::warn!("[remote] 同步 provider 反序列化失败: {error}");
-                    None
-                }
-            }
-        }
-        _ => None,
-    };
-    (rewritten, sync)
+
+    #[test]
+    fn claude_edit_inactive_provider_preserves_actual_remote_selection() {
+        let edited = provider("inactive");
+        let args = project_remote_claude_args(
+            "provider.update",
+            json!({"app":"claude", "provider":edited}),
+            edited.clone(),
+            15721,
+        )
+        .unwrap();
+        // 即使省略 originalId，也保留规范密钥，只让 projected 使用代理占位符。
+        assert_eq!(args["provider"], edited);
+        assert_eq!(
+            args["projected"]["settingsConfig"]["env"]["ANTHROPIC_API_KEY"],
+            "PROXY_MANAGED"
+        );
+        let actual = remote_current_provider(
+            &json!("active"),
+            &json!({"active":provider("active"),"inactive":edited}),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(actual.id, "active");
+    }
+
+    #[test]
+    fn claude_remote_selection_requires_valid_current_snapshot() {
+        assert!(remote_current_provider(&json!("missing"), &json!({})).is_err());
+        assert!(remote_current_provider(&json!("a"), &json!({"a":provider("b")})).is_err());
+        assert!(remote_current_provider(&json!(null), &json!({})).is_err());
+        assert!(remote_current_provider(&json!(""), &json!({}))
+            .unwrap()
+            .is_none());
+    }
 }
 
 #[derive(Serialize)]

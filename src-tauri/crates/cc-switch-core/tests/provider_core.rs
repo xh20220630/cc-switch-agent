@@ -133,3 +133,52 @@ fn exchange_copy_into_empty_target_does_not_select_or_write_live() {
     assert_eq!(ProviderService::current(&state, "claude").unwrap(), "copy");
     assert!(home.path().join(".claude/settings.json").exists());
 }
+
+/// 远程编辑必须同时维护规范密钥和代理投影；未启用项的编辑不能改变当前 live。
+#[test]
+fn claude_remote_projected_edit_updates_key_without_selecting_inactive_provider() {
+    let home = tempfile::tempdir().unwrap();
+    let state = HeadlessState::memory(home.path()).unwrap();
+    ProviderService::add(
+        &state,
+        "claude",
+        provider("active", "Active", "key-old"),
+        true,
+    )
+    .unwrap();
+    ProviderService::add(
+        &state,
+        "claude",
+        provider("inactive", "Inactive", "key-other"),
+        false,
+    )
+    .unwrap();
+    let raw = provider("active", "Active edited", "key-new");
+    let mut projected = raw.clone();
+    projected.settings_config["env"]["ANTHROPIC_BASE_URL"] = json!("http://127.0.0.1:15721/remote");
+    projected.settings_config["env"]["ANTHROPIC_AUTH_TOKEN"] = json!("PROXY_MANAGED");
+    ProviderService::update_with_projection(&state, "claude", "active", raw, Some(projected))
+        .unwrap();
+    let path = home.path().join(".claude/settings.json");
+    let before = std::fs::read(&path).unwrap();
+    let live: serde_json::Value = serde_json::from_slice(&before).unwrap();
+    assert_eq!(live["env"]["ANTHROPIC_AUTH_TOKEN"], "PROXY_MANAGED");
+    assert_eq!(
+        ProviderService::list(&state, "claude").unwrap()["active"].settings_config["env"]
+            ["ANTHROPIC_AUTH_TOKEN"],
+        "key-new"
+    );
+    ProviderService::update_with_projection(
+        &state,
+        "claude",
+        "inactive",
+        provider("inactive", "Other edited", "other-new"),
+        Some(provider("inactive", "Other projected", "PROXY_MANAGED")),
+    )
+    .unwrap();
+    assert_eq!(
+        ProviderService::current(&state, "claude").unwrap(),
+        "active"
+    );
+    assert_eq!(std::fs::read(path).unwrap(), before);
+}

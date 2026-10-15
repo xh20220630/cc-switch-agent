@@ -63,6 +63,8 @@ pub struct RemoteRuntimeState {
     credentials: RemoteCredentialStore,
     snapshot: Mutex<RemoteRuntimeSnapshot>,
     session: Mutex<Option<SharedRuntimeSession>>,
+    /// 串行覆盖桌面命令的远程写入和路由刷新，防止迟到响应把代理指回较早的选择。
+    provider_operations: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl RemoteRuntimeState {
@@ -90,6 +92,7 @@ impl RemoteRuntimeState {
             credentials,
             snapshot: Mutex::new(snapshot),
             session: Mutex::new(None),
+            provider_operations: Arc::new(tokio::sync::Mutex::new(())),
         })
     }
 
@@ -310,7 +313,11 @@ impl RemoteRuntimeState {
             .map_err(RemoteRuntimeError::Ssh)
     }
 
-    fn require_generation(&self, expected: u64) -> Result<(), RemoteRuntimeError> {
+    pub(crate) async fn lock_provider_operations(&self) -> tokio::sync::OwnedMutexGuard<()> {
+        self.provider_operations.clone().lock_owned().await
+    }
+
+    pub(crate) fn require_generation(&self, expected: u64) -> Result<(), RemoteRuntimeError> {
         let snapshot = self.lock_snapshot()?;
         if snapshot.generation != expected {
             return Err(RemoteRuntimeError::StaleRuntime {

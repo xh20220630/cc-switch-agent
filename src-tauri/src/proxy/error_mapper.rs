@@ -37,8 +37,8 @@ pub fn map_proxy_error_to_status(error: &ProxyError) -> u16 {
         // 所有供应商已熔断：503 Service Unavailable
         ProxyError::AllProvidersCircuitOpen => 503,
 
-        // 未配置供应商：503 Service Unavailable
-        ProxyError::NoProvidersConfigured => 503,
+        // 远端初始化/切换期间的不可用也映射为 503，日志与实际 HTTP 响应保持一致。
+        ProxyError::NoProvidersConfigured | ProxyError::RemoteRouteUnavailable => 503,
 
         // 重试耗尽：503 Service Unavailable
         ProxyError::MaxRetriesExceeded => 503,

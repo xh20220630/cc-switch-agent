@@ -38,6 +38,10 @@ pub enum ProxyError {
     #[error("未配置供应商")]
     NoProvidersConfigured,
 
+    /// 与远端初始化/切换的短暂不可用对应，使用 503 而非参数错误，便于 CLI 重试。
+    #[error("远程供应商路由尚未就绪，请稍后重试或重新连接目标主机")]
+    RemoteRouteUnavailable,
+
     #[allow(dead_code)]
     #[error("Provider不健康: {0}")]
     ProviderUnhealthy(String),
@@ -135,6 +139,9 @@ impl IntoResponse for ProxyError {
                         (StatusCode::SERVICE_UNAVAILABLE, self.to_string())
                     }
                     ProxyError::NoProvidersConfigured => {
+                        (StatusCode::SERVICE_UNAVAILABLE, self.to_string())
+                    }
+                    ProxyError::RemoteRouteUnavailable => {
                         (StatusCode::SERVICE_UNAVAILABLE, self.to_string())
                     }
                     ProxyError::ProviderUnhealthy(_) => {

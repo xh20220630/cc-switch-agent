@@ -26,33 +26,37 @@ pub struct ProviderRouter {
     db: Arc<Database>,
     /// 熔断器管理器 - key 格式: "app_type:provider_id"
     circuit_breakers: Arc<RwLock<HashMap<String, Arc<CircuitBreaker>>>>,
-    /// 远程隧道请求的 current provider (app_type -> provider_id)。
-    /// 由远程切换/编辑时同步, 与本地 current 完全隔离。
-    remote_current: Arc<RwLock<HashMap<String, String>>>,
+    /// 远程供应商快照由 ProxyService 持有，服务器重启仍复用；不依赖本机同名 ID 的记录。
+    remote_current: RemoteProviderRoutes,
 }
+
+pub(crate) type RemoteProviderRoutes = Arc<RwLock<HashMap<String, Provider>>>;
 
 impl ProviderRouter {
     /// 创建新的供应商路由器
+    #[cfg(test)]
     pub fn new(db: Arc<Database>) -> Self {
+        Self::with_remote_routes(db, RemoteProviderRoutes::default())
+    }
+
+    pub(crate) fn with_remote_routes(
+        db: Arc<Database>,
+        remote_current: RemoteProviderRoutes,
+    ) -> Self {
         Self {
             db,
             circuit_breakers: Arc::new(RwLock::new(HashMap::new())),
-            remote_current: Arc::new(RwLock::new(HashMap::new())),
+            remote_current,
         }
     }
 
     /// 更新远程隧道请求的 current provider；由远程切换/编辑时调用。
-    pub async fn set_remote_current(&self, app_type: &str, provider_id: String) {
+    #[cfg(test)]
+    pub async fn set_remote_current(&self, app_type: &str, provider: Provider) {
         self.remote_current
             .write()
             .await
-            .insert(app_type.to_string(), provider_id.clone());
-        log::info!("[proxy] 远程路由 current[{app_type}] = {provider_id}");
-    }
-
-    /// 读取远程隧道请求的 current provider。
-    pub async fn remote_current_id(&self, app_type: &str) -> Option<String> {
-        self.remote_current.read().await.get(app_type).cloned()
+            .insert(app_type.to_string(), provider);
     }
 
     /// 选择可用的供应商（支持故障转移）
@@ -66,26 +70,32 @@ impl ProviderRouter {
         is_remote: bool,
     ) -> Result<Vec<Provider>, AppError> {
         let current_provider = self.current_provider(app_type, is_remote).await?;
+        if is_remote {
+            // 本地故障转移队列不属于远程主机，不能用它覆盖远端的明确选择。
+            return current_provider
+                .map(|provider| vec![provider])
+                .ok_or(AppError::NoProvidersConfigured);
+        }
         self.select_providers_with_current(app_type, current_provider)
             .await
     }
 
-    /// 远程隧道优先使用同步到桌面数据库的影子供应商；本机请求使用上游模式控制器的
-    /// 当前路由，避免把直连指针当成代理指针。上下文只读取一次，再传给故障转移选择。
+    /// 远程隧道只使用远端确认的快照；缺失时显式拒绝，绝不借用本机供应商及其凭据。
+    /// 本机请求继续使用模式控制器；上下文只读取一次以保持整条请求的选择一致。
     pub(crate) async fn current_provider(
         &self,
         app_type: &str,
         is_remote: bool,
     ) -> Result<Option<Provider>, AppError> {
         if is_remote {
-            if let Some(id) = self.remote_current_id(app_type).await {
-                if let Some(provider) = self.db.get_provider_by_id(&id, app_type)? {
-                    return Ok(Some(provider));
-                }
-                log::warn!("[{app_type}] 远程 current provider 不在桌面 DB，回退本地路由");
-            } else {
-                log::warn!("[{app_type}] 远程路由未设置 current，回退本地路由");
-            }
+            return self
+                .remote_current
+                .read()
+                .await
+                .get(app_type)
+                .cloned()
+                .map(Some)
+                .ok_or(AppError::RemoteRouteUnavailable);
         }
         Ok(AppType::from_str(app_type).ok().and_then(|app_enum| {
             crate::mode::current::provider_in_use(&self.db, &app_enum)
@@ -441,7 +451,12 @@ mod tests {
         }
         db.set_current_provider("claude", "local").unwrap();
         let router = ProviderRouter::new(db.clone());
-        router.set_remote_current("claude", "remote".into()).await;
+        router
+            .set_remote_current(
+                "claude",
+                db.get_provider_by_id("remote", "claude").unwrap().unwrap(),
+            )
+            .await;
         assert_eq!(
             router.select_providers("claude", true).await.unwrap()[0].id,
             "remote"
@@ -454,6 +469,65 @@ mod tests {
             db.get_current_provider("claude").unwrap().as_deref(),
             Some("local")
         );
+    }
+
+    /// 即使本机有可用 current 和故障转移队列，未初始化的远程请求也必须失败。
+    #[tokio::test]
+    #[serial]
+    async fn test_remote_missing_route_never_uses_local_credentials() {
+        let _home = TempHome::new();
+        let db = Arc::new(Database::memory().unwrap());
+        db.save_provider(
+            "claude",
+            &Provider::with_id("local".into(), "Local".into(), json!({}), None),
+        )
+        .unwrap();
+        db.set_current_provider("claude", "local").unwrap();
+        db.add_to_failover_queue("claude", "local").unwrap();
+        let mut config = db.get_proxy_config_for_app("claude").await.unwrap();
+        config.auto_failover_enabled = true;
+        db.update_proxy_config_for_app(config).await.unwrap();
+        let router = ProviderRouter::new(db);
+        assert!(router.select_providers("claude", true).await.is_err());
+    }
+
+    /// 远端相同 ID 的凭据与本机记录独立，本机故障转移也不能替换远端选择。
+    #[tokio::test]
+    #[serial]
+    async fn test_remote_snapshot_ignores_local_id_collision_and_failover() {
+        let _home = TempHome::new();
+        let db = Arc::new(Database::memory().unwrap());
+        db.save_provider(
+            "claude",
+            &Provider::with_id(
+                "shared".into(),
+                "Local".into(),
+                json!({"key":"local"}),
+                None,
+            ),
+        )
+        .unwrap();
+        db.set_current_provider("claude", "shared").unwrap();
+        db.add_to_failover_queue("claude", "shared").unwrap();
+        let mut config = db.get_proxy_config_for_app("claude").await.unwrap();
+        config.auto_failover_enabled = true;
+        db.update_proxy_config_for_app(config).await.unwrap();
+        let router = ProviderRouter::new(db);
+        router
+            .set_remote_current(
+                "claude",
+                Provider::with_id(
+                    "shared".into(),
+                    "Remote".into(),
+                    json!({"key":"remote"}),
+                    None,
+                ),
+            )
+            .await;
+        let selected = router.select_providers("claude", true).await.unwrap();
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].name, "Remote");
+        assert_eq!(selected[0].settings_config["key"], "remote");
     }
 
     #[tokio::test]

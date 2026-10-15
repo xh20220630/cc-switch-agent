@@ -23,6 +23,8 @@ pub struct ProxyService {
     /// AppHandle，用于传递给 ProxyServer 以支持故障转移时的 UI 更新
     app_handle: Arc<RwLock<Option<tauri::AppHandle>>>,
     switch_locks: SwitchLockManager,
+    /// 与 HTTP 服务生命周期分离，切回本机后保留的 SSH 隧道也继续使用原远端快照。
+    remote_routes: crate::proxy::provider_router::RemoteProviderRoutes,
 }
 
 /// 重启失败时写回库的那份配置：设置页只动四个全局字段，旧接口是整份七个字段。
@@ -63,6 +65,7 @@ impl ProxyService {
             server: Arc::new(RwLock::new(None)),
             app_handle: Arc::new(RwLock::new(None)),
             switch_locks: SwitchLockManager::new(),
+            remote_routes: Default::default(),
         }
     }
 
@@ -137,7 +140,12 @@ impl ProxyService {
 
         // 4. 创建并启动服务器
         let app_handle = self.app_handle.read().await.clone();
-        let server = ProxyServer::new(config.clone(), self.db.clone(), app_handle);
+        let server = ProxyServer::with_remote_routes(
+            config.clone(),
+            self.db.clone(),
+            app_handle,
+            self.remote_routes.clone(),
+        );
         let info = server
             .start()
             .await
@@ -455,14 +463,22 @@ impl ProxyService {
         }
     }
 
-    /// 更新远程隧道请求的 current provider（经 SSH 转发, base_url 带 /remote 前缀）。
-    /// 与本地 current 完全隔离；代理未运行时仅记日志。
-    pub async fn set_remote_current(&self, app_type: &str, provider_id: &str) {
-        if let Some(server) = self.server.read().await.as_ref() {
-            server.set_remote_current(app_type, provider_id).await;
-        } else {
-            log::warn!("[proxy] 代理未运行，远程路由 current[{app_type}] = {provider_id} 未生效");
+    /// 只接收远端确认的完整快照；即使代理暂未启动，也为后续启动保留正确路由。
+    pub async fn set_remote_current(&self, app_type: &str, provider: Option<Provider>) {
+        let mut routes = self.remote_routes.write().await;
+        match provider {
+            Some(provider) => {
+                routes.insert(app_type.to_string(), provider);
+            }
+            None => {
+                routes.remove(app_type);
+            }
         }
+    }
+
+    /// 换主机前撤销上一主机的全部绑定；切回本机不调用，保留原隧道的可用性。
+    pub async fn clear_remote_routes(&self) {
+        self.remote_routes.write().await.clear();
     }
 
     /// 获取代理配置
@@ -576,7 +592,12 @@ impl ProxyService {
     /// 按 `config` 起一个新服务，动态端口回写进库。
     async fn start_with(&self, config: &ProxyConfig) -> Result<ProxyServer, String> {
         let app_handle = self.app_handle.read().await.clone();
-        let server = ProxyServer::new(config.clone(), self.db.clone(), app_handle);
+        let server = ProxyServer::with_remote_routes(
+            config.clone(),
+            self.db.clone(),
+            app_handle,
+            self.remote_routes.clone(),
+        );
         let info = server.start().await.map_err(|e| e.to_string())?;
         if let Err(e) = self
             .persist_ephemeral_listen_port_if_needed(config, info.port)
@@ -780,5 +801,44 @@ mod tests {
         assert!(service.is_running().await);
         service.stop().await.unwrap();
         drop(blocker);
+    }
+    /// HTTP 服务停启不能丢远端快照；清理主机绑定后则必须拒绝远程请求。
+    #[tokio::test]
+    async fn claude_remote_route_survives_proxy_restart_and_clears_on_target_change() {
+        let db = Arc::new(Database::memory().unwrap());
+        let service = ProxyService::new(db.clone());
+        service
+            .set_remote_current(
+                "claude",
+                Some(Provider::with_id(
+                    "remote".into(),
+                    "Remote".into(),
+                    json!({}),
+                    None,
+                )),
+            )
+            .await;
+        let mut config = db.get_proxy_config().await.unwrap();
+        config.listen_address = "127.0.0.1".into();
+        config.listen_port = 0;
+        for _ in 0..2 {
+            let server = service.start_with(&config).await.unwrap();
+            // 使用 HTTP 服务实际共享的路由表，断言重建前后选中相同的远程供应商。
+            let router = crate::proxy::provider_router::ProviderRouter::with_remote_routes(
+                db.clone(),
+                service.remote_routes.clone(),
+            );
+            assert_eq!(
+                router.select_providers("claude", true).await.unwrap()[0].id,
+                "remote"
+            );
+            server.stop().await.unwrap();
+        }
+        service.clear_remote_routes().await;
+        let router = crate::proxy::provider_router::ProviderRouter::with_remote_routes(
+            db,
+            service.remote_routes.clone(),
+        );
+        assert!(router.select_providers("claude", true).await.is_err());
     }
 }

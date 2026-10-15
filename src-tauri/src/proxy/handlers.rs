@@ -2477,6 +2477,8 @@ fn codex_proxy_error_code(error: &ProxyError) -> &'static str {
         ProxyError::NoAvailableProvider => "cc_switch_no_available_provider",
         ProxyError::AllProvidersCircuitOpen => "cc_switch_all_providers_circuit_open",
         ProxyError::NoProvidersConfigured => "cc_switch_no_providers_configured",
+        // 远程绑定缺失是可重试状态，不能归为本机配置错误或悄悄改走其他供应商。
+        ProxyError::RemoteRouteUnavailable => "cc_switch_remote_route_unavailable",
         ProxyError::MaxRetriesExceeded => "cc_switch_max_retries_exceeded",
         ProxyError::ProviderUnhealthy(_) => "cc_switch_provider_unhealthy",
         ProxyError::ConfigError(_) => "cc_switch_config_error",
